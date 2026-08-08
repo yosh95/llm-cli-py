@@ -19,14 +19,6 @@ def set_base_dir(path: Path) -> None:
     _BASE_DIR = path
 
 
-def config_dir() -> Path:
-    return get_base_dir()
-
-
-def log_dir() -> Path:
-    return get_base_dir() / "logs"
-
-
 def history_file_path() -> Path:
     return get_base_dir() / "history.txt"
 
@@ -58,9 +50,6 @@ DEFAULT_PYTHON_EXEC_TIMEOUT: int = 60
 MAX_TOOL_ITERATIONS: int = 500
 """Maximum number of tool-call iterations per user request."""
 
-WEB_SEARCH_MAX_RETRIES: int = 3
-"""Maximum number of retries for Brave Search API requests."""
-
 
 # ── Environment variable names ─────────────────────────────────────
 
@@ -75,13 +64,6 @@ ENV_MODEL = "LLM_CLI_MODEL"
 
 ENV_VERIFIER_MODEL = "LLM_CLI_VERIFIER_MODEL"
 """Environment variable for the verifier model (separate from the main LLM)."""
-
-ENV_INCLUDE_REASONING = "LLM_CLI_INCLUDE_REASONING"
-"""Environment variable to force include/exclude reasoning parameter.
-Set to '1' or 'true' to always send reasoning.
-Set to '0' or 'false' to never send it.
-When unset, reasoning is included by default.
-"""
 
 ENV_PROXY_URL = "LLM_CLI_PROXY_URL"
 """Environment variable for the proxy URL.

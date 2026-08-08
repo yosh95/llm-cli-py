@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm_cli_py.consts import MAX_TOOL_ITERATIONS
-from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
+from llm_cli_py.models import DataSource, LlmResponse, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
@@ -45,28 +45,6 @@ class TestActiveSessionInit:
         assert len(session.trace_id) > 0
         assert session.client is not None
         assert session.ctx is not None
-
-    def test_switch_client_preserves_conversation(self, session: ActiveSession) -> None:
-        session.client.state.conversation = [Message(role=Role.USER, content="Hello")]
-        new_client = LlmApiClient(
-            model="claude-3",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        session.switch_client(new_client)
-        assert session.client.state.model == "claude-3"
-        assert len(session.client.state.conversation) == 1
-        assert session.client.state.conversation[0].content == "Hello"
-
-    def test_switch_client_empty_conversation(self, session: ActiveSession) -> None:
-        new_client = LlmApiClient(
-            model="claude-3",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        session.switch_client(new_client)
-        assert session.client.state.model == "claude-3"
-        assert session.client.state.conversation == []
 
 
 class TestProcessAndPrint:

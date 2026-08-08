@@ -28,6 +28,7 @@ class SlashCommandCompleter(Completer):
             "/clear": "Clear conversation history",
             "/info": "Show session information",
             "/dump": "Dump conversation history as TOML to stdout",
+            "/verifier": "Toggle verifier on/off",
         }
 
     def get_completions(

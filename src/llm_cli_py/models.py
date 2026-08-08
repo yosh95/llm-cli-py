@@ -22,7 +22,6 @@ class Message:
     role: Role
     content: str
     tool_call_id: str | None = None
-    tool_name: str | None = None
     name: str | None = None
     tool_calls: list[dict[str, object]] | None = None
     """Tool calls data (for assistant messages)."""

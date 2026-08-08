@@ -26,10 +26,6 @@ class LlmClient(ABC):
         """Send a chat completion request."""
         ...
 
-    def get_display_name(self) -> str:
-        """Get display name."""
-        return self._state.model
-
     @property
     def api_url(self) -> str:
         """Return the API base URL this client connects to."""

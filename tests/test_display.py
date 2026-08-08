@@ -9,8 +9,6 @@ import pytest
 
 from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem
 from llm_cli_py.ui.display import (
-    _should_hide_model,
-    format_provider_model,
     format_tool_result,
     print_assistant,
     print_block,
@@ -18,49 +16,11 @@ from llm_cli_py.ui.display import (
     print_reasoning,
     print_tool_call,
     print_tool_result,
-    redact_provider_model,
     report_error,
     report_info,
     report_success,
     report_warning,
 )
-
-
-class TestModelRedaction:
-    """Test model name redaction for demos."""
-
-    def setup_method(self) -> None:
-        from llm_cli_py.ui import display
-
-        display._HIDE_MODEL = None
-
-    def test_redact_when_env_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LLM_CLI_HIDE_MODEL", "true")
-        provider, model = redact_provider_model("openai", "gpt-4o")
-        assert provider == ""
-        assert model == ""
-
-    def test_no_redact_when_env_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("LLM_CLI_HIDE_MODEL", raising=False)
-        provider, model = redact_provider_model("openai", "gpt-4o")
-        assert provider == "openai"
-        assert model == "gpt-4o"
-
-    def test_format_provider_model_redacted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LLM_CLI_HIDE_MODEL", "1")
-        assert format_provider_model("openai", "gpt-4o") == ""
-
-    def test_format_provider_model_normal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("LLM_CLI_HIDE_MODEL", raising=False)
-        assert format_provider_model("openai", "gpt-4o") == "openai:gpt-4o"
-
-    def test_should_hide_model_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LLM_CLI_HIDE_MODEL", "yes")
-        assert _should_hide_model() is True
-
-    def test_should_hide_model_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("LLM_CLI_HIDE_MODEL", raising=False)
-        assert _should_hide_model() is False
 
 
 class TestPrintFunctions:

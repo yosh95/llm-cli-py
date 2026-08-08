@@ -42,12 +42,6 @@ class ActiveSession:
         self.ctx = ctx
         self.trace_id = str(uuid.uuid4())
 
-    def switch_client(self, new_client: LlmClient) -> None:
-        """Switch to a different LLM client, preserving conversation."""
-        old_state = self.client.state
-        new_client.state.conversation = old_state.conversation
-        self.client = new_client
-
     @property
     def token_usage(self) -> tuple[int, int, int]:
         """Return (prompt_tokens, completion_tokens, total_tokens)."""

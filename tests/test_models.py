@@ -34,7 +34,6 @@ class TestMessage:
         assert msg.role == Role.USER
         assert msg.content == "Hello"
         assert msg.tool_call_id is None
-        assert msg.tool_name is None
         assert msg.name is None
 
     def test_message_with_tool_info(self) -> None:
@@ -42,11 +41,9 @@ class TestMessage:
             role=Role.TOOL,
             content='{"result": "ok"}',
             tool_call_id="call_123",
-            tool_name="python",
         )
         assert msg.role == Role.TOOL
         assert msg.tool_call_id == "call_123"
-        assert msg.tool_name == "python"
 
 
 class TestDataSource:

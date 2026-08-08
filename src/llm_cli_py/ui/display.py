@@ -3,36 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 
 from ..tools.types import ExecResult, SearchResult, ToolError, ToolResult
-
-# ── Model name redaction for demos ──────────────────────────────────
-_HIDE_MODEL: bool | None = None
-
-
-def _should_hide_model() -> bool:
-    """Check whether provider/model names should be hidden in output."""
-    global _HIDE_MODEL
-    if _HIDE_MODEL is None:
-        _HIDE_MODEL = os.environ.get("LLM_CLI_HIDE_MODEL", "").lower() in ("1", "true", "yes")
-    return _HIDE_MODEL
-
-
-def redact_provider_model(provider: str, model: str) -> tuple[str, str]:
-    """Redact provider/model names if LLM_CLI_HIDE_MODEL is set."""
-    if _should_hide_model():
-        return ("", "")
-    return (provider, model)
-
-
-def format_provider_model(provider: str, model: str) -> str:
-    """Format as ``provider:model``. When hiding is active, returns empty string."""
-    if _should_hide_model():
-        return ""
-    return f"{provider}:{model}"
 
 
 def _term_width() -> int:

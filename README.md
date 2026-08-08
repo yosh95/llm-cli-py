@@ -54,11 +54,14 @@ llm-cli-py
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
 | `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
-| `LLM_CLI_INCLUDE_REASONING` | Set to `0` or `false` to disable the reasoning parameter. |
-| `LLM_CLI_HIDE_MODEL` | Set to `true` to redact model names in output (for demos). |
 | `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
 | `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
+| `PROXY_PORT` | Port the proxy listens on (default `8080`). |
 | `BRAVE_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
+| `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
+| `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
+| `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
+| `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
 
 ## Usage
 
@@ -87,7 +90,7 @@ llm-cli-py --proxy-url http://proxy-server:8080
 | Command | Description |
 |---|---|
 | `/help`, `/h` | Show help |
-| `/quit`, `/q` | Exit session |
+| `/quit`, `/q`, `/exit` | Exit session |
 | `/clear`, `/c` | Clear conversation |
 | `/info`, `/i` | Show session info |
 | `/dump` | Dump conversation as TOML |

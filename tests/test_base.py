@@ -35,14 +35,6 @@ class TestLlmClientBase:
         assert isinstance(client.state, ClientState)
         assert client.state.model == "claude-3"
 
-    def test_get_display_name(self) -> None:
-        client = _ConcreteClient(model="gpt-4o")
-        assert client.get_display_name() == "gpt-4o"
-
-    def test_get_display_name_empty(self) -> None:
-        client = _ConcreteClient(model="")
-        assert client.get_display_name() == ""
-
     def test_send_is_abstract(self) -> None:
         """Verify that LlmClient.send is abstract and must be overridden."""
         with pytest.raises(TypeError):

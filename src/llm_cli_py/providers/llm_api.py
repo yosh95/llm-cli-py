@@ -10,7 +10,7 @@ from typing import Any
 import requests
 
 from ..base import LlmClient
-from ..consts import DEFAULT_REQUEST_TIMEOUT, ENV_INCLUDE_REASONING
+from ..consts import DEFAULT_REQUEST_TIMEOUT
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..utils.http import post_with_retries
 
@@ -36,16 +36,6 @@ def _get_system_prompt() -> str:
     return _get_default_system_prompt()
 
 
-def _should_include_reasoning() -> bool:
-    """Determine whether to request the model's thinking/reasoning trace.
-
-    Returns ``False`` only when ``LLM_CLI_INCLUDE_REASONING`` is set
-    to ``0`` or ``false``; otherwise returns ``True`` (default on).
-    """
-    env_val = os.environ.get(ENV_INCLUDE_REASONING, "").lower()
-    return env_val not in ("0", "false")
-
-
 class LlmApiClient(LlmClient):
     """Client for OpenAI-compatible ``/chat/completions`` endpoint."""
 
@@ -60,7 +50,6 @@ class LlmApiClient(LlmClient):
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
-        self._include_reasoning = _should_include_reasoning()
         self._session = requests.Session()
         if self._api_key:
             self._session.headers.update(
