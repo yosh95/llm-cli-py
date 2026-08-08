@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import uuid
 
-from prompt_toolkit.shortcuts import prompt as pt_prompt
-
 from .. import ui
 from ..base import LlmClient
 from ..consts import MAX_TOOL_ITERATIONS
@@ -14,6 +12,7 @@ from ..models import DataSource, Message, Role, ToolCall
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
 from ..verifier import Verifier
+from .input_backend import InputBackend, PlainInputBackend
 
 
 class SessionContext:
@@ -24,10 +23,15 @@ class SessionContext:
         tool_registry: ToolRegistry,
         verifier: Verifier | None = None,
         max_tool_iterations: int = MAX_TOOL_ITERATIONS,
+        backend: InputBackend | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.verifier = verifier
         self.max_tool_iterations = max_tool_iterations
+        # Backend used for interactive confirmations (e.g. verifier override).
+        # Defaults to a plain input() so that automation / non-tty runs never
+        # trigger prompt_toolkit's terminal manipulation unexpectedly.
+        self.backend = backend if backend is not None else PlainInputBackend()
 
 
 class ActiveSession:
@@ -115,7 +119,9 @@ class ActiveSession:
                 if not approved:
                     ui.display.report_warning(f"Verifier rejected '{tc.name}': {reason}")
 
-                    raw_input_text = pt_prompt("\u2753 Execute anyway? [Y/n or feedback] ").strip()
+                    raw_input_text = self.ctx.backend.prompt(
+                        "\u2753 Execute anyway? [Y/n or feedback] "
+                    ).strip()
                     user_confirmation = raw_input_text.lower()
                     if user_confirmation in ("", "y", "yes"):
                         ui.display.report_info("User override: executing tool call.")

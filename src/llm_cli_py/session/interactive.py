@@ -5,16 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 
 import tomli_w
-from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
-from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .. import ui
 from ..consts import history_file_path
 from ..models import DataSource
+from .input_backend import InputBackend, create_backend
 from .session import ActiveSession
 
 
@@ -176,26 +175,30 @@ _SLASH_COMMANDS: dict[str, Callable[[ActiveSession, str], str | None]] = {
 def run_interactive(
     session: ActiveSession,
     initial_sources: list[DataSource] | None = None,
+    plain_input: bool = False,
 ) -> None:
-    """Run the interactive chat session loop."""
+    """Run the interactive chat session loop.
+
+    Args:
+        session: The active session to drive.
+        initial_sources: Optional initial inputs to process before prompting.
+        plain_input: When True, use a plain ``input()`` backend that never
+            touches the terminal. Safe for automation / non-tty stdin.
+    """
     hist_path = history_file_path()
     hist_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not hist_path.exists():
         hist_path.touch()
 
-    history = FileHistory(str(hist_path))
     completer = SlashCommandCompleter()
     bindings = _build_key_bindings()
 
-    prompt_session: PromptSession[str] = PromptSession(
-        history=history,
+    backend: InputBackend = create_backend(
+        hist_path,
+        plain=plain_input,
         completer=completer,
-        key_bindings=bindings,
-        multiline=True,
-        enable_open_in_editor=True,
-        vi_mode=False,
-        complete_while_typing=False,
+        bindings=bindings,
     )
 
     print("Type /h for help, /q to quit.")
@@ -207,7 +210,7 @@ def run_interactive(
         try:
             ui.display.print_rule()
             prompt_text = _get_prompt_text()
-            user_input = prompt_session.prompt(prompt_text)
+            user_input = backend.prompt(prompt_text)
 
             if not user_input.strip():
                 continue

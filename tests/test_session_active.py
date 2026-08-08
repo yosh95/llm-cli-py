@@ -251,7 +251,7 @@ class TestVerifierIntegration:
                 "send",
                 side_effect=responses,
             ),
-            patch("llm_cli_py.session.session.pt_prompt", return_value="y"),
+            patch.object(session.ctx.backend, "prompt", return_value="y"),
         ):
             session.process_and_print([DataSource(text="Run code")])
 
@@ -279,7 +279,7 @@ class TestVerifierIntegration:
                 "send",
                 side_effect=responses,
             ),
-            patch("llm_cli_py.session.session.pt_prompt", return_value="n"),
+            patch.object(session.ctx.backend, "prompt", return_value="n"),
         ):
             session.process_and_print([DataSource(text="Run code")])
 
@@ -306,7 +306,7 @@ class TestVerifierIntegration:
                 "send",
                 side_effect=responses,
             ),
-            patch("llm_cli_py.session.session.pt_prompt", return_value="This is actually safe because..."),
+            patch.object(session.ctx.backend, "prompt", return_value="This is actually safe because..."),
         ):
             session.process_and_print([DataSource(text="Run code")])
 

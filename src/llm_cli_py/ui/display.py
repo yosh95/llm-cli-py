@@ -77,6 +77,10 @@ def print_tool_call(name: str, args: dict[str, object]) -> None:
             for line in v.strip().splitlines():
                 print(f"      {_sanitize_terminal_output(line)}")
         else:
+            # Sanitize non-code argument values too: URLs, queries, etc. may
+            # carry control characters that corrupt the terminal state.
+            if isinstance(v, str):
+                v = _sanitize_terminal_output(v)
             print(f"    {k}: {v}")
 
 
