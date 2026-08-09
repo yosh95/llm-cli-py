@@ -118,6 +118,18 @@ def build_parser() -> argparse.ArgumentParser:
         "Also enabled automatically when stdin is not a tty.",
     )
 
+    parser.add_argument(
+        "--disable-reasoning",
+        action="store_true",
+        help="Disable model thinking/reasoning for all providers and models (default: enabled).",
+    )
+    parser.add_argument(
+        "--enable-reasoning",
+        action="store_true",
+        help="Keep model thinking/reasoning enabled. Overrides "
+        "--disable-reasoning and the LLM_CLI_DISABLE_REASONING env var.",
+    )
+
     # Subcommands
     subparsers = parser.add_subparsers(dest="command")
 
@@ -247,6 +259,14 @@ def main() -> None:
         verifier.set_enabled(False)
         ui_display.report_info("Verifier disabled (--disable-verifier). All tool calls allowed.")
 
+    # ── Resolve reasoning toggle ────────────────────────────────────
+    # Priority: --enable-reasoning > --disable-reasoning > env var (default off)
+    disable_reasoning: bool | None = None
+    if args.enable_reasoning:
+        disable_reasoning = False
+    elif args.disable_reasoning:
+        disable_reasoning = True
+
     # ── Initialize LLM client and run session ────────────────────────
     with (
         LlmApiClient(
@@ -254,6 +274,7 @@ def main() -> None:
             api_url=api_url,
             api_key=api_key,
             timeout=request_timeout,
+            disable_reasoning=disable_reasoning,
         ) as client,
         verifier,
     ):

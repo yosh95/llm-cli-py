@@ -11,7 +11,7 @@ from typing import Any
 import requests
 
 from ..base import LlmClient
-from ..consts import DEFAULT_REQUEST_TIMEOUT
+from ..consts import DEFAULT_REQUEST_TIMEOUT, ENV_DISABLE_REASONING
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..utils.http import post_with_retries
 
@@ -23,6 +23,37 @@ def _get_default_system_prompt() -> str:
         f"Today's actual date is: {today.isoformat()}. "
         "When the user asks for current information, use today's date as reference."
     )
+
+
+def should_disable_reasoning(override: bool | None = None) -> bool:
+    """Return whether model thinking/reasoning should be disabled.
+
+    Priority: explicit ``override`` > ``LLM_CLI_DISABLE_REASONING`` env var
+    (default "1" = disabled). Returns True when reasoning should be turned off.
+    """
+    if override is not None:
+        return override
+    val = os.environ.get(ENV_DISABLE_REASONING, "1").strip().lower()
+    return val not in ("0", "false", "no", "off", "")
+
+
+def reasoning_disable_params(api_url: str) -> dict[str, Any]:
+    """Return provider-appropriate request params to disable thinking/reasoning.
+
+    The provider is detected from the API base URL so the correct parameter is
+    sent regardless of which model is used:
+
+    - OpenRouter: ``reasoning: {"enabled": false}``
+    - Ollama / Ollama Cloud (OpenAI-compatible ``/v1`` endpoint):
+      ``reasoning_effort: "none"`` (plus ``think: false`` for native API)
+    - Generic OpenAI-compatible endpoint: ``reasoning_effort: "none"``
+    """
+    url = (api_url or "").lower()
+    if "openrouter" in url:
+        return {"reasoning": {"enabled": False}}
+    if "ollama" in url or "11434" in url:
+        return {"reasoning_effort": "none", "think": False}
+    return {"reasoning_effort": "none"}
 
 
 def _get_system_prompt() -> str:
@@ -46,11 +77,13 @@ class LlmApiClient(LlmClient):
         api_url: str,
         api_key: str | None = None,
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        disable_reasoning: bool | None = None,
     ) -> None:
         super().__init__(model)
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
+        self._disable_reasoning = disable_reasoning
         self._session = requests.Session()
         if self._api_key:
             self._session.headers.update(
@@ -137,6 +170,11 @@ class LlmApiClient(LlmClient):
                     }
                 )
             body["tools"] = tools
+
+        # Disable thinking/reasoning by default (provider-aware). Can be turned
+        # back on via --enable-reasoning / LLM_CLI_DISABLE_REASONING=0.
+        if should_disable_reasoning(self._disable_reasoning):
+            body.update(reasoning_disable_params(self._api_url))
 
         return body
 

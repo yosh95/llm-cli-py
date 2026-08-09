@@ -74,6 +74,13 @@ ENV_VERIFIER_MODEL = "LLM_CLI_VERIFIER_MODEL"
 ENV_REQUEST_TIMEOUT = "LLM_CLI_REQUEST_TIMEOUT"
 """Environment variable overriding the LLM API request timeout in seconds."""
 
+ENV_DISABLE_REASONING = "LLM_CLI_DISABLE_REASONING"
+"""Environment variable controlling whether model thinking/reasoning is disabled.
+
+Set to "1"/"true" (default) to disable thinking/reasoning for all providers and
+models. Set to "0"/"false" to keep reasoning enabled.
+"""
+
 ENV_PROXY_URL = "LLM_CLI_PROXY_URL"
 """Environment variable for the proxy URL.
 When set, both LLM API and Brave Search requests go through this proxy.

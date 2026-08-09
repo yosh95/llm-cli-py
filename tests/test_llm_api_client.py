@@ -262,6 +262,45 @@ class TestLlmApiClient:
         client.close()
         client.close()  # should not raise
 
+    def test_build_request_disables_reasoning_for_openrouter(self) -> None:
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://openrouter.ai/api/v1",
+            api_key="key",
+        )
+        body = client._build_request([{"role": "user", "content": "hi"}], [])
+        assert body["reasoning"] == {"enabled": False}
+
+    def test_build_request_disables_reasoning_for_ollama(self) -> None:
+        client = LlmApiClient(
+            model="qwen3",
+            api_url="https://ollama.com/v1",
+            api_key="key",
+        )
+        body = client._build_request([{"role": "user", "content": "hi"}], [])
+        assert body["reasoning_effort"] == "none"
+        assert body["think"] is False
+
+    def test_build_request_keeps_reasoning_when_enabled(self) -> None:
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://openrouter.ai/api/v1",
+            api_key="key",
+            disable_reasoning=False,
+        )
+        body = client._build_request([{"role": "user", "content": "hi"}], [])
+        assert "reasoning" not in body
+
+    def test_build_request_respects_env_disable_reasoning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LLM_CLI_DISABLE_REASONING", "0")
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://openrouter.ai/api/v1",
+            api_key="key",
+        )
+        body = client._build_request([{"role": "user", "content": "hi"}], [])
+        assert "reasoning" not in body
+
 
 class TestLlmResponse:
     """Test LlmResponse integration with the client."""

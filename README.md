@@ -46,6 +46,29 @@ export LLM_CLI_PROXY_URL=http://<proxy-ip>:8080
 llm-cli-py
 ```
 
+## Thinking / Reasoning
+
+By default this CLI disables model thinking/reasoning for **all** providers and
+models, so responses are fast and don't include a long internal reasoning trace.
+
+- **OpenRouter** → sends `"reasoning": {"enabled": false}`
+- **Ollama / Ollama Cloud** (OpenAI-compatible `/v1`) → sends `"reasoning_effort": "none"` (and `"think": false`)
+
+The provider is detected automatically from the API URL, so no per-model config
+is needed. To turn thinking back **on**, use:
+
+```bash
+llm-cli-py --enable-reasoning ...
+# or
+LLM_CLI_DISABLE_REASONING=0 llm-cli-py ...
+```
+
+To force it **off** (even if the env var says otherwise):
+
+```bash
+llm-cli-py --disable-reasoning ...
+```
+
 ## Environment Variables
 
 | Variable | Description |
@@ -56,6 +79,7 @@ llm-cli-py
 | `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
 | `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
 | `LLM_CLI_REQUEST_TIMEOUT` | Override the LLM API request timeout in seconds (default 1800). Useful for cloud reasoning models that can take minutes before their first token. |
+| `LLM_CLI_DISABLE_REASONING` | Disable model thinking/reasoning for all providers and models. Set to `1`/`true` (default) to turn thinking off, or `0`/`false` to keep it on. Can be overridden with `--disable-reasoning` / `--enable-reasoning`. |
 | `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
 | `PROXY_PORT` | Port the proxy listens on (default `8080`). |
 | `BRAVE_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
