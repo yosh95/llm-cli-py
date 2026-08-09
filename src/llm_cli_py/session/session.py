@@ -117,7 +117,7 @@ class ActiveSession:
             if not state.reasoning_open:
                 ui.display.stream_start("\U0001f9e0 Reasoning (thinking process):")
                 state.reasoning_open = True
-            ui.display.stream_text(delta)
+            ui.display.stream_reasoning(delta)
 
         def on_text(delta: str) -> None:
             # If reasoning just finished, close it before the answer.
@@ -173,7 +173,7 @@ class ActiveSession:
                     if not _st.reasoning_open:
                         ui.display.stream_start("\U0001f9e0 Verifier reasoning:")
                         _st.reasoning_open = True
-                    ui.display.stream_text(delta)
+                    ui.display.stream_reasoning(delta)
 
                 def on_content(delta: str, _st: StreamState = verifier_state) -> None:
                     if _st.reasoning_open:

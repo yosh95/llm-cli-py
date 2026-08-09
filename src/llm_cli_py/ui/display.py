@@ -53,17 +53,37 @@ def print_assistant(text: str) -> None:
     print_block(text, title="\U0001f916 Assistant")
 
 
+def _collapse_reasoning(text: str) -> str:
+    """Collapse newlines and runs of whitespace in a reasoning trace.
+
+    Some reasoning models (e.g. DeepSeek R1 style) emit one token per line,
+    often as ``word\n word`` (newline followed by a space), so the raw trace
+    appears as one word per line with stray double spaces. Since reasoning is
+    internal thinking (not the final answer), we collapse newlines and any run
+    of whitespace into a single space for a readable single-paragraph display.
+    """
+    text = text.replace("\n", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def stream_reasoning(delta: str) -> None:
+    """Print a reasoning delta, collapsing newlines/whitespace into spaces (live)."""
+    print(_collapse_reasoning(delta), end="", flush=True)
+
+
 def print_reasoning(reasoning: str) -> None:
     """Display the model's reasoning / thinking trace.
 
     Shown inside a dotted-line box so it is visually separated
-    from the final answer text.
+    from the final answer text. Newlines and runs of whitespace are
+    collapsed into single spaces (see :func:`_collapse_reasoning`).
     """
     if not reasoning or not reasoning.strip():
         return
     print_rule()
     print("\U0001f9e0 Reasoning (thinking process):")
-    print(reasoning.strip())
+    print(_collapse_reasoning(reasoning).strip())
 
 
 def stream_start(title: str) -> None:
