@@ -34,7 +34,7 @@ trace / queue before producing their first token. A 5-minute ceiling was
 causing intermittent timeouts on long prompts that eventually succeeded.
 """
 
-DEFAULT_VERIFIER_TIMEOUT: int = 60
+DEFAULT_VERIFIER_TIMEOUT: int = 30
 """Default timeout for verifier API requests."""
 
 DEFAULT_WEB_SEARCH_TIMEOUT: int = 60
