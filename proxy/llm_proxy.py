@@ -269,7 +269,7 @@ def _inspect_request(_method: str, path: str, body: bytes) -> str:
 # ── Core Handlers ──────────────────────────────────────────────────
 
 
-async def handle_chat(request: web.Request) -> web.Response:
+async def handle_chat(request: web.Request) -> web.StreamResponse:
     """Forward a chat completion request to the upstream LLM API.
 
     The proxy injects the model name from its own ``LLM_CLI_MODEL``
@@ -284,14 +284,29 @@ async def handle_chat(request: web.Request) -> web.Response:
     body = await request.read()
     headers = _build_upstream_headers(request)
 
+    is_stream = False
     if LLM_MODEL:
         try:
             data = json.loads(body)
             data["model"] = LLM_MODEL
+            is_stream = bool(data.get("stream", False))
             body = json.dumps(data).encode("utf-8")
             log.info(f"Injected model '{LLM_MODEL}' into chat request")
         except (json.JSONDecodeError, TypeError) as exc:
             log.warning(f"Could not parse request body to inject model: {exc}")
+
+    if is_stream:
+        # Pass through the SSE token stream live instead of buffering it.
+        return await _forward_request_stream(
+            request,
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            body=body,
+            params=dict(request.query),
+            timeout=300,
+            service="LLM Chat",
+        )
 
     return await _forward_request(
         method=request.method,
@@ -304,7 +319,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     )
 
 
-async def handle_web_search(request: web.Request) -> web.Response:
+async def handle_web_search(request: web.Request) -> web.StreamResponse:
     """Forward a web search request to Brave Search API."""
     target_url = DEFAULT_BRAVE_SEARCH_URL
     log.info(f"Search: {request.method} -> {target_url}")
@@ -339,7 +354,7 @@ async def handle_web_search(request: web.Request) -> web.Response:
     )
 
 
-async def handle_forward_proxy(request: web.Request) -> web.Response:
+async def handle_forward_proxy(request: web.Request) -> web.StreamResponse:
     """Handle forward proxy requests (absolute URI or CONNECT)."""
     url_str = str(request.url)
     if url_str.startswith(("http://", "https://")):
@@ -492,6 +507,80 @@ def _build_upstream_headers(request: web.Request) -> dict[str, str]:
         headers["Content-Type"] = "application/json"
 
     return headers
+
+
+async def _forward_request_stream(
+    request: web.Request,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    params: dict[str, str] | None = None,
+    timeout: int = 300,
+    service: str = "LLM Chat",
+) -> web.StreamResponse:
+    """Forward a request to the target URL and stream the SSE response back.
+
+    Used for ``stream: true`` chat requests. The upstream ``text/event-stream``
+    body is piped to the client chunk-by-chunk so reasoning / answer tokens
+    appear live, rather than being buffered until the whole response completes.
+    """
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=body,
+                timeout=aiohttp.ClientTimeout(total=timeout, sock_read=timeout),
+            ) as resp,
+        ):
+            resp_headers = {
+                k: v
+                for k, v in resp.headers.items()
+                if k.lower()
+                not in (
+                    "transfer-encoding",
+                    "content-encoding",
+                    "content-length",
+                    "alt-svc",
+                )
+            }
+            # Stream back the body incrementally.
+            stream_resp = web.StreamResponse(
+                status=resp.status,
+                headers=resp_headers,
+            )
+            await stream_resp.prepare(request)
+            async for chunk in resp.content.iter_any():
+                if chunk:
+                    await stream_resp.write(chunk)
+            await stream_resp.write_eof()
+            log.info(f"{service}: streamed {method} {url} -> {resp.status}")
+            return stream_resp
+    except TimeoutError:
+        log.error(f"{service}: Timeout after {timeout}s for {url}")
+        return web.Response(
+            status=504,
+            text=json.dumps({"error": f"Upstream timeout after {timeout}s"}),
+            content_type="application/json",
+        )
+    except aiohttp.ClientError as e:
+        log.error(f"{service}: Connection error for {url}: {e}")
+        return web.Response(
+            status=502,
+            text=json.dumps({"error": f"Upstream connection error: {str(e)}"}),
+            content_type="application/json",
+        )
+    except Exception as e:
+        log.error(f"{service}: Unexpected error for {url}: {e}")
+        return web.Response(
+            status=502,
+            text=json.dumps({"error": f"Proxy error: {str(e)}"}),
+            content_type="application/json",
+        )
 
 
 async def _forward_request(

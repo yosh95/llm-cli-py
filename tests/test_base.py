@@ -5,6 +5,8 @@ Covers display name and abstract method enforcement.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from llm_cli_py.base import LlmClient
@@ -18,7 +20,12 @@ class _ConcreteClient(LlmClient):
         self,
         _data: list[DataSource],
         _tool_schemas: list[ToolSchema],
+        stream: bool = False,
+        on_text: Callable[[str], None] | None = None,
+        on_reasoning: Callable[[str], None] | None = None,
     ) -> LlmResponse:
+        # Parameters exist to satisfy the abstract base signature.
+        _ = (stream, on_text, on_reasoning)
         return LlmResponse(text="mocked")
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 import requests
@@ -130,12 +131,92 @@ class Verifier:
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
 
+    def _request(self, messages: list[dict[str, Any]], *, stream: bool) -> Any:
+        """POST a chat-completions request to the verifier endpoint.
+
+        NO tools parameter is sent - the verifier works without tools.
+        """
+        return post_with_retries(
+            self._session,
+            f"{self._api_url}/chat/completions",
+            {
+                "model": self._model,
+                "messages": messages,
+                "stream": stream,
+            },
+            self._timeout,
+            stream=stream,
+        )
+
+    @staticmethod
+    def _read_content(resp: Any) -> str:
+        """Extract the assistant content from a non-streaming response."""
+        data = resp.json()
+        return str(data["choices"][0]["message"]["content"])
+
+    def _consume_stream(
+        self,
+        resp: Any,
+        on_reasoning: Callable[[str], None] | None,
+        on_content: Callable[[str], None] | None,
+    ) -> str:
+        """Consume an SSE token stream, surfacing reasoning/content deltas.
+
+        Returns the fully accumulated assistant content (used to parse the
+        verifier's JSON verdict after the stream completes).
+        """
+        content_parts: list[str] = []
+        for raw_line_bytes in resp.iter_lines():
+            if not raw_line_bytes:
+                continue
+            raw_line = raw_line_bytes.decode("utf-8", errors="replace")
+            if raw_line.startswith("data:"):
+                payload = raw_line[len("data:") :].strip()
+            elif raw_line.startswith(":"):
+                continue  # SSE comment line
+            else:
+                payload = raw_line
+
+            if not payload or payload == "[DONE]":
+                continue
+
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+
+            # Reasoning trace: providers disagree on the field name.
+            reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+            if reasoning and on_reasoning:
+                on_reasoning(reasoning)
+
+            content = delta.get("content")
+            if content:
+                content_parts.append(content)
+                if on_content:
+                    on_content(content)
+
+        return "".join(content_parts)
+
     def verify(
         self,
         tool_call: ToolCall,
         conversation_context: list[dict[str, Any]],
+        on_reasoning: Callable[[str], None] | None = None,
+        on_content: Callable[[str], None] | None = None,
     ) -> tuple[bool, str]:
-        """Verify a tool call. Returns (approved, reason)."""
+        """Verify a tool call. Returns (approved, reason).
+
+        When ``on_reasoning`` or ``on_content`` is provided, the verifier
+        request is streamed (SSE) and each reasoning / content delta is
+        surfaced live through those callbacks, mirroring the main LLM path.
+        If no callback is given, a plain non-streaming request is used.
+        """
         if not self._enabled:
             return True, "Verifier disabled"
 
@@ -163,19 +244,17 @@ class Verifier:
         )
 
         try:
-            resp = post_with_retries(
-                self._session,
-                f"{self._api_url}/chat/completions",
-                {
-                    "model": self._model,
-                    "messages": messages,
-                    "stream": False,
-                    # NO tools parameter - verifier works without tools
-                },
-                self._timeout,
-            )
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
+            # Stream when callbacks want live output; any call provides an
+            # immediate non-streaming fallback so verification always finishes.
+            stream = on_reasoning is not None or on_content is not None
+            resp = self._request(messages, stream=stream)
+            if stream:
+                content = self._consume_stream(resp, on_reasoning, on_content)
+                if not content:
+                    resp = self._request(messages, stream=False)
+                    content = self._read_content(resp)
+            else:
+                content = self._read_content(resp)
 
             result = _extract_json_object(content)
             if result is None:

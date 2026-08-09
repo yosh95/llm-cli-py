@@ -8,11 +8,12 @@ import uuid
 from .. import ui
 from ..base import LlmClient
 from ..consts import MAX_TOOL_ITERATIONS
-from ..models import DataSource, Message, Role, ToolCall
+from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
 from ..verifier import Verifier
 from .input_backend import InputBackend, PlainInputBackend
+from .stream_state import StreamState
 
 
 class SessionContext:
@@ -83,24 +84,72 @@ class ActiveSession:
             ui.display.print_rule()
             print(f"\U0001f914 {display_model} is thinking...")
 
+            stream_state = StreamState()
+
             try:
-                response = self.client.send(current_data, tool_schemas)
+                response = self._send_streamed(
+                    current_data,
+                    tool_schemas,
+                    stream_state,
+                )
             except Exception as e:
                 ui.display.report_error(f"LLM request failed: {e}")
                 break
             current_data = []
 
-            if response.text or response.reasoning:
-                if response.reasoning:
-                    ui.display.print_reasoning(response.reasoning)
-                if response.text:
-                    ui.display.print_assistant(response.text)
+            self._finalize_streamed(stream_state, response)
 
             if not response.tool_calls:
                 break
 
             self._handle_tool_calls(response.tool_calls)
             current_data = []
+
+    def _send_streamed(
+        self,
+        data: list[DataSource],
+        tool_schemas: list[ToolSchema],
+        state: StreamState,
+    ) -> LlmResponse:
+        """Send a streaming turn, displaying reasoning / answer deltas live."""
+
+        def on_reasoning(delta: str) -> None:
+            if not state.reasoning_open:
+                ui.display.stream_start("\U0001f9e0 Reasoning (thinking process):")
+                state.reasoning_open = True
+            ui.display.stream_text(delta)
+
+        def on_text(delta: str) -> None:
+            # If reasoning just finished, close it before the answer.
+            if state.reasoning_open:
+                ui.display.stream_end()
+                state.reasoning_open = False
+            if not state.answer_open:
+                ui.display.stream_start("\U0001f916 Assistant:")
+                state.answer_open = True
+            ui.display.stream_text(delta)
+
+        return self.client.send(
+            data,
+            tool_schemas,
+            stream=True,
+            on_text=on_text,
+            on_reasoning=on_reasoning,
+        )
+
+    def _finalize_streamed(self, state: StreamState, response: LlmResponse) -> None:
+        """Close open streaming blocks and show any missed (non-streamed) output.
+
+        A provider may return a non-streaming fallback (e.g. re-requested tool
+        calls) or an error body that produced no deltas; display it once here.
+        """
+        if state.reasoning_open or state.answer_open:
+            ui.display.stream_end()
+        if not state.reasoning_open and not state.answer_open:
+            if response.reasoning:
+                ui.display.print_reasoning(response.reasoning)
+            if response.text:
+                ui.display.print_assistant(response.text)
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls (with verification and optional user confirmation)."""
@@ -111,10 +160,40 @@ class ActiveSession:
                 verifier_model = self.ctx.verifier.model if self.ctx.verifier.model else "LLM"
                 ui.display.print_rule()
                 print(f"\U0001f50d {verifier_model} checking...")
+
                 ctx_messages = [
                     {"role": m.role.value, "content": m.content} for m in self.client.state.conversation[-5:]
                 ]
-                approved, reason = self.ctx.verifier.verify(tc, ctx_messages)
+
+                # Stream the verifier's reasoning and response live, mirroring
+                # how the main LLM turn is displayed.
+                verifier_state = StreamState()
+
+                def on_reasoning(delta: str, _st: StreamState = verifier_state) -> None:
+                    if not _st.reasoning_open:
+                        ui.display.stream_start("\U0001f9e0 Verifier reasoning:")
+                        _st.reasoning_open = True
+                    ui.display.stream_text(delta)
+
+                def on_content(delta: str, _st: StreamState = verifier_state) -> None:
+                    if _st.reasoning_open:
+                        ui.display.stream_end()
+                        _st.reasoning_open = False
+                    if not _st.answer_open:
+                        ui.display.stream_start("\U0001f3db\ufe0f Verifier:")
+                        _st.answer_open = True
+                    ui.display.stream_text(delta)
+
+                approved, reason = self.ctx.verifier.verify(
+                    tc,
+                    ctx_messages,
+                    on_reasoning=on_reasoning,
+                    on_content=on_content,
+                )
+
+                if verifier_state.reasoning_open or verifier_state.answer_open:
+                    ui.display.stream_end()
+
                 ui.display.print_rule()
                 if not approved:
                     ui.display.report_warning(f"Verifier rejected '{tc.name}': {reason}")

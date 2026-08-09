@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -90,6 +91,12 @@ class LlmApiClient(LlmClient):
             elif msg.role == Role.ASSISTANT and msg.tool_calls:
                 entry["content"] = msg.content or None
                 entry["tool_calls"] = msg.tool_calls
+                # DeepSeek V4 requires the assistant reasoning trace to be
+                # round-tripped alongside a tool call, or the next request
+                # fails with HTTP 400. Include it under the provider-agnostic
+                # "reasoning" key so both DeepSeek/Ollama and OpenRouter work.
+                if msg.reasoning:
+                    entry["reasoning"] = msg.reasoning
             else:
                 entry["content"] = msg.content
 
@@ -101,12 +108,19 @@ class LlmApiClient(LlmClient):
         self,
         messages: list[dict[str, Any]],
         tool_schemas: list[ToolSchema],
+        stream: bool = False,
     ) -> dict[str, Any]:
-        """Build the request body for the API call."""
+        """Build the request body for the API call.
+
+        Args:
+            messages: The message array to send.
+            tool_schemas: Tool schemas to advertise to the model.
+            stream: When True, request a Server-Sent Events (SSE) token stream.
+        """
         body: dict[str, Any] = {
             "model": self._state.model,
             "messages": messages,
-            "stream": False,
+            "stream": stream,
         }
 
         if tool_schemas:
@@ -172,13 +186,137 @@ class LlmApiClient(LlmClient):
             reasoning=reasoning,
         )
 
-    def send(
+    def _parse_stream_chunk(self, chunk: dict[str, Any]) -> dict[str, Any]:
+        """Parse a single streaming ``choices[0].delta`` chunk.
+
+        Returns a dict with the delta fields (``content``, ``reasoning``,
+        ``tool_calls``) plus ``finish_reason``. Both ``reasoning_content``
+        (DeepSeek/Ollama) and ``reasoning`` (OpenRouter) delta field names are
+        recognised, and accumulated by the caller.
+        """
+        choices = chunk.get("choices") or []
+        if not choices:
+            return {}
+        choice = choices[0]
+        delta = choice.get("delta") or {}
+        parsed: dict[str, Any] = {}
+        content = delta.get("content")
+        if content:
+            parsed["content"] = content
+        # Reasoning trace: providers disagree on the field name.
+        reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+        if reasoning:
+            parsed["reasoning"] = reasoning
+        tc = delta.get("tool_calls")
+        if tc:
+            parsed["tool_calls"] = tc
+        parsed["finish_reason"] = choice.get("finish_reason")
+        return parsed
+
+    def _parse_stream_response(
         self,
-        data: list[DataSource],
-        tool_schemas: list[ToolSchema],
+        response: requests.Response,
+        on_text: Callable[[str], None] | None = None,
+        on_reasoning: Callable[[str], None] | None = None,
     ) -> LlmResponse:
-        """Send a chat request to the OpenAI-compatible ``/chat/completions`` endpoint."""
-        # Append user messages from data to conversation state
+        """Consume an SSE stream from ``requests.Response``.
+
+        - Text deltas are printed via ``on_text`` as they arrive (live).
+        - Reasoning deltas are printed via ``on_reasoning`` as they arrive.
+        - Tool-call arguments are buffered per ``index`` and only executed
+          after the whole call is complete. If a buffered ``arguments`` string
+          does not parse as JSON (broken/malformed chunk), a ``ToolCall`` with
+          ``{"raw": ...}`` arguments is returned so the caller can fall back.
+
+        Returns an :class:`LlmResponse` with the fully accumulated result.
+        """
+        reasoning_parts: list[str] = []
+        text_parts: list[str] = []
+        tool_calls_map: dict[int, dict[str, Any]] = {}
+        finish_reason: str | None = None
+
+        for raw_line_bytes in response.iter_lines():
+            if not raw_line_bytes:
+                continue
+            raw_line = raw_line_bytes.decode("utf-8", errors="replace")
+            # SSE: each event is "data: <json>" (possibly blank / comment lines)
+            if raw_line.startswith("data:"):
+                payload = raw_line[len("data:") :].strip()
+            elif raw_line.startswith(":"):
+                continue  # SSE comment line
+            else:
+                payload = raw_line
+
+            if not payload or payload == "[DONE]":
+                continue
+
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            delta = self._parse_stream_chunk(chunk)
+            if not delta:
+                continue
+
+            if delta.get("finish_reason"):
+                finish_reason = delta["finish_reason"]
+
+            content = delta.get("content")
+            if content:
+                text_parts.append(content)
+                if on_text:
+                    on_text(content)
+
+            reasoning = delta.get("reasoning")
+            if reasoning:
+                reasoning_parts.append(reasoning)
+                if on_reasoning:
+                    on_reasoning(reasoning)
+
+            for tc in delta.get("tool_calls") or []:
+                index = tc.get("index", 0)
+                entry = tool_calls_map.setdefault(
+                    index,
+                    {"id": tc.get("id") or "", "name": "", "arguments": ""},
+                )
+                fn = tc.get("function") or {}
+                if tc.get("id"):
+                    entry["id"] = tc["id"]
+                if fn.get("name"):
+                    entry["name"] = fn["name"]
+                # arguments stream as JSON fragments -> concatenate
+                if fn.get("arguments"):
+                    entry["arguments"] += fn["arguments"]
+
+        tool_calls: list[ToolCall] = []
+        for index in sorted(tool_calls_map):
+            entry = tool_calls_map[index]
+            args_raw = entry["arguments"]
+            try:
+                arguments: Any = json.loads(args_raw) if args_raw else {}
+            except json.JSONDecodeError:
+                # Malformed / truncated chunk. Keep the raw string so the
+                # caller can fall back (e.g. re-request non-streaming).
+                arguments = {"raw": args_raw}
+            tool_calls.append(
+                ToolCall(
+                    id=entry["id"] or f"call_{index}",
+                    name=entry["name"],
+                    arguments=arguments,
+                )
+            )
+
+        result = LlmResponse(
+            text="".join(text_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            reasoning="\n".join(reasoning_parts) or None,
+        )
+        return result
+
+    def _append_user_messages(self, data: list[DataSource]) -> None:
+        """Append user messages from ``data`` to the conversation state."""
         user_content = ""
         for ds in data:
             if ds.source_type == "text":
@@ -190,42 +328,105 @@ class LlmApiClient(LlmClient):
         if user_content.strip():
             self._state.conversation.append(Message(role=Role.USER, content=user_content.strip()))
 
-        messages = self._build_messages()
-        body = self._build_request(messages, tool_schemas)
+    def _record_assistant(self, result: LlmResponse) -> None:
+        """Append the assistant response (text/reasoning/tool_calls) to history."""
+        if not (result.text or result.tool_calls):
+            return
+        tool_calls_data: list[dict[str, object]] | None = None
+        if result.tool_calls:
+            tool_calls_data = []
+            for tc in result.tool_calls:
+                tool_calls_data.append(
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            # OpenAI-compatible APIs require arguments to be a
+                            # JSON-encoded string, not a nested object, when the
+                            # assistant's tool call is replayed back in later requests.
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    }
+                )
 
+        self._state.conversation.append(
+            Message(
+                role=Role.ASSISTANT,
+                content=result.text or "",
+                tool_calls=tool_calls_data,
+                reasoning=result.reasoning,
+            )
+        )
+
+    def _post_non_streaming(
+        self,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[ToolSchema],
+    ) -> LlmResponse:
+        """Send a non-streaming request and parse the complete response."""
+        body = self._build_request(messages, tool_schemas, stream=False)
         resp = post_with_retries(
             self._session,
             self._api_url + "/chat/completions",
             body,
             self._timeout,
         )
-        result = self._parse_response(resp.json())
+        return self._parse_response(resp.json())
 
-        if result.text or result.tool_calls:
-            tool_calls_data: list[dict[str, object]] | None = None
-            if result.tool_calls:
-                tool_calls_data = []
-                for tc in result.tool_calls:
-                    tool_calls_data.append(
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                # OpenAI-compatible APIs require arguments to be a
-                                # JSON-encoded string, not a nested object, when the
-                                # assistant's tool call is replayed back in later requests.
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                            },
-                        }
-                    )
+    def send(
+        self,
+        data: list[DataSource],
+        tool_schemas: list[ToolSchema],
+        stream: bool = False,
+        on_text: Callable[[str], None] | None = None,
+        on_reasoning: Callable[[str], None] | None = None,
+    ) -> LlmResponse:
+        """Send a chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
 
-            msg = Message(
-                role=Role.ASSISTANT,
-                content=result.text or "",
-                tool_calls=tool_calls_data,
-                reasoning=result.reasoning,
+        Args:
+            data: User input sources for this turn.
+            tool_schemas: Tool schemas to advertise (always sent, since this CLI
+                enables ``web_search`` and ``execute_python`` by default).
+            stream: When True, consume the SSE token stream and surface text /
+                reasoning deltas live via ``on_text`` / ``on_reasoning``.
+            on_text: Optional callback invoked with each text delta (streaming).
+            on_reasoning: Optional callback invoked with each reasoning delta.
+
+        Returns:
+            An :class:`LlmResponse`. In streaming mode, tool-call arguments are
+            buffered until complete; if a buffered tool-call does not parse as
+            JSON (broken chunks), the call is transparently re-requested in
+            non-streaming mode to obtain a well-formed tool call.
+        """
+        self._append_user_messages(data)
+
+        messages = self._build_messages()
+        body = self._build_request(messages, tool_schemas, stream=stream)
+
+        resp = post_with_retries(
+            self._session,
+            self._api_url + "/chat/completions",
+            body,
+            self._timeout,
+            stream=stream,
+        )
+
+        if stream:
+            result = self._parse_stream_response(
+                resp,
+                on_text=on_text,
+                on_reasoning=on_reasoning,
             )
-            self._state.conversation.append(msg)
+            # If any streamed tool call has broken/truncated JSON arguments,
+            # re-request that turn non-streaming to get a well-formed call.
+            # This is a fallback for LLMs that occasionally split chunks badly.
+            if result.tool_calls and any(
+                isinstance(tc.arguments, dict) and "raw" in tc.arguments for tc in result.tool_calls
+            ):
+                result = self._post_non_streaming(messages, tool_schemas)
+        else:
+            result = self._parse_response(resp.json())
 
+        self._record_assistant(result)
         return result

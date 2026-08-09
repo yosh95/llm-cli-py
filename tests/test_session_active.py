@@ -6,6 +6,7 @@ error handling, and MAX_TOOL_ITERATIONS enforcement.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -285,6 +286,60 @@ class TestVerifierIntegration:
 
         captured = capsys.readouterr()
         assert "skipped" in captured.out.lower()
+
+    def test_verifier_streams_reasoning_and_response(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        verifier = MagicMock(spec=Verifier)
+        verifier.enabled = True
+        verifier.is_configured = True
+        verifier.model = "verifier-model"
+
+        def fake_verify(
+            _tc: object,
+            _ctx: object,
+            on_reasoning: Callable[[str], None] | None = None,
+            on_content: Callable[[str], None] | None = None,
+        ) -> tuple[bool, str]:
+            if on_reasoning:
+                on_reasoning("Thinking about it...")
+            if on_content:
+                on_content('{"approved": true, "reason": "safe"}')
+            return (True, "safe")
+
+        verifier.verify.side_effect = fake_verify
+        session.ctx.verifier = verifier
+
+        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
+            return ExecResult(stdout="done")
+
+        session.ctx.tool_registry.register(
+            "safe_tool",
+            "Safe",
+            {"type": "object", "properties": {}, "required": []},
+            safe_tool,
+        )
+
+        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
+        responses = [
+            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
+            LlmResponse(text="All good!", tool_calls=[]),
+        ]
+        with patch.object(
+            session.client,
+            "send",
+            side_effect=responses,
+        ):
+            session.process_and_print([DataSource(text="Run safe tool")])
+
+        captured = capsys.readouterr()
+        assert "Verifier reasoning:" in captured.out
+        assert "Thinking about it..." in captured.out
+        assert "Verifier:" in captured.out
+        # Streaming callbacks were wired through to verify()
+        kwargs = verifier.verify.call_args.kwargs
+        assert kwargs["on_reasoning"] is not None
+        assert kwargs["on_content"] is not None
 
     def test_verifier_rejected_with_feedback(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]

@@ -55,6 +55,7 @@ llm-cli-py
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
 | `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
 | `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
+| `LLM_CLI_REQUEST_TIMEOUT` | Override the LLM API request timeout in seconds (default 1800). Useful for cloud reasoning models that can take minutes before their first token. |
 | `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
 | `PROXY_PORT` | Port the proxy listens on (default `8080`). |
 | `BRAVE_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
@@ -113,6 +114,36 @@ To avoid this:
 - `--plain-input` — use plain `input()` instead of `prompt_toolkit`.
 - **Auto-fallback** — if stdin is not a tty (piped / automated), the CLI
   automatically switches to plain `input()` regardless of the flag.
+
+## Streaming
+
+The CLI requests responses in streaming mode (`stream: true`). Reasoning and
+answer tokens are rendered live as they arrive, so long-running thinking traces
+(e.g. DeepSeek V4 Flash on Ollama Cloud, which can think for minutes before its
+first answer token) are visible instead of appearing to hang.
+
+- **Reasoning / thinking** tokens are streamed and shown under a
+  `Reasoning (thinking process):` heading.
+- **Answer** tokens stream under an `Assistant:` heading.
+- **Tool calls** are buffered across chunks and only executed once their
+  arguments are complete. If a provider emits a broken/truncated tool-call
+  argument chunk, that turn is transparently re-requested in non-streaming
+  mode so a well-formed call is obtained.
+- The **verifier** model is also streamed: its reasoning / thinking is shown
+  live under a `Verifier reasoning:` heading and its JSON verdict streams under
+  a `Verifier:` heading before the approve/reject verdict is printed. If the
+  verifier stream yields no content, it transparently falls back to a
+  non-streaming request so verification always completes.
+- The reasoning trace is round-tripped back to the API on assistant messages
+  that include tool calls (required by DeepSeek V4, which otherwise rejects
+  the next request with HTTP 400).
+
+When routing through `llm_proxy.py`, the proxy relays the SSE stream to the
+client live, so streaming works end-to-end over the LAN proxy as well.
+
+If you need to disable streaming (e.g. to inspect raw non-streamed responses),
+you can lower the request timeout or adjust the client; by default streaming
+is always on.
 
 ## Tools
 

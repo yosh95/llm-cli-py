@@ -14,6 +14,8 @@ def post_with_retries(
     json_body: dict[str, Any],
     timeout: int,
     max_retries: int = 3,
+    *,
+    stream: bool = False,
 ) -> requests.Response:
     """POST with retry on transient failures (429, 5xx, timeout, connection errors).
 
@@ -36,7 +38,7 @@ def post_with_retries(
     last_exception: Exception | None = None
     for attempt in range(max_retries):
         try:
-            resp = session.post(url, json=json_body, timeout=timeout)
+            resp = session.post(url, json=json_body, timeout=timeout, stream=stream)
             if resp.status_code in (429, 500, 502, 503, 504):
                 last_exception = requests.exceptions.HTTPError(
                     f"HTTP {resp.status_code}",

@@ -25,8 +25,14 @@ def history_file_path() -> Path:
 
 # ── Timeout constants (seconds) ────────────────────────────────────
 
-DEFAULT_REQUEST_TIMEOUT: int = 300
-"""Default timeout for LLM API requests (chat completions)."""
+DEFAULT_REQUEST_TIMEOUT: int = 1800
+"""Default timeout for LLM API requests (chat completions).
+
+Raised from 300s to 1800s (30 min) because cloud reasoning models (e.g.
+DeepSeek V4 Flash on Ollama Cloud) can spend minutes in a long thinking
+trace / queue before producing their first token. A 5-minute ceiling was
+causing intermittent timeouts on long prompts that eventually succeeded.
+"""
 
 DEFAULT_VERIFIER_TIMEOUT: int = 60
 """Default timeout for verifier API requests."""
@@ -64,6 +70,9 @@ ENV_MODEL = "LLM_CLI_MODEL"
 
 ENV_VERIFIER_MODEL = "LLM_CLI_VERIFIER_MODEL"
 """Environment variable for the verifier model (separate from the main LLM)."""
+
+ENV_REQUEST_TIMEOUT = "LLM_CLI_REQUEST_TIMEOUT"
+"""Environment variable overriding the LLM API request timeout in seconds."""
 
 ENV_PROXY_URL = "LLM_CLI_PROXY_URL"
 """Environment variable for the proxy URL.

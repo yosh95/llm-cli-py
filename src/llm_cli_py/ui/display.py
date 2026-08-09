@@ -66,6 +66,23 @@ def print_reasoning(reasoning: str) -> None:
     print(reasoning.strip())
 
 
+def stream_start(title: str) -> None:
+    """Emit the opening label for a streaming block (thinking or answer)."""
+    print_rule()
+    print(title)
+    print("", end="", flush=True)
+
+
+def stream_text(delta: str) -> None:
+    """Print an incremental text delta without a trailing newline (live)."""
+    print(delta, end="", flush=True)
+
+
+def stream_end() -> None:
+    """Terminate a streaming line with a newline."""
+    print("", flush=True)
+
+
 def print_tool_call(name: str, args: dict[str, object]) -> None:
     """Display a tool call with its arguments as plain text."""
     print_rule()

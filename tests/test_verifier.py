@@ -285,6 +285,72 @@ class TestVerifier:
         assert verifier.enabled is True
         assert verifier.is_configured is False
 
+    @patch("llm_cli_py.utils.http.requests.Session.post")
+    def test_verify_streams_reasoning_and_content(self, mock_post: MagicMock) -> None:
+        import json as _json
+
+        def chunk(delta: dict[str, str]) -> str:
+            return f"data: {_json.dumps({'choices': [{'delta': delta}]})}"
+
+        stream_resp = MagicMock()
+        stream_resp.status_code = 200
+        stream_resp.iter_lines.return_value = [
+            chunk({"reasoning_content": "Checking "}).encode(),
+            chunk({"reasoning_content": "safety"}).encode(),
+            chunk({"content": '{"approved": true, "reason": "read only"}'}).encode(),
+            b"data: [DONE]",
+        ]
+        mock_post.return_value = stream_resp
+
+        verifier = Verifier(
+            api_url="https://api.example.com/v1",
+            api_key="test-key",
+            model="gpt-4o-mini",
+        )
+        tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
+        reasoning: list[str] = []
+        content: list[str] = []
+        approved, reason = verifier.verify(
+            tool_call,
+            [],
+            on_reasoning=reasoning.append,
+            on_content=content.append,
+        )
+
+        assert approved is True
+        assert reason == "read only"
+        assert reasoning == ["Checking ", "safety"]
+        assert content == ['{"approved": true, "reason": "read only"}']
+        # Request was sent with stream=True
+        assert mock_post.call_args.kwargs["json"]["stream"] is True
+
+    @patch("llm_cli_py.utils.http.requests.Session.post")
+    def test_verify_stream_falls_back_when_empty(self, mock_post: MagicMock) -> None:
+        # Stream yields nothing -> fall back to a non-streaming parse.
+        empty_stream = MagicMock()
+        empty_stream.status_code = 200
+        empty_stream.iter_lines.return_value = [b"data: [DONE]"]
+
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.json.return_value = {
+            "choices": [{"message": {"content": '{"approved": true, "reason": "fallback ok"}'}}]
+        }
+        mock_post.side_effect = [empty_stream, ok_response]
+
+        verifier = Verifier(
+            api_url="https://api.example.com/v1",
+            api_key="test-key",
+            model="gpt-4o-mini",
+        )
+        tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
+        approved, reason = verifier.verify(tool_call, [], on_content=lambda _d: None)
+        assert approved is True
+        assert reason == "fallback ok"
+        # first call stream=True, fallback stream=False
+        assert mock_post.call_args_list[0].kwargs["json"]["stream"] is True
+        assert mock_post.call_args_list[1].kwargs["json"]["stream"] is False
+
 
 class TestExtractJsonObject:
     """Test the resilient JSON extraction used by the verifier."""

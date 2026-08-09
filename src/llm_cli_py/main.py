@@ -23,6 +23,7 @@ from .consts import (
     ENV_API_URL,
     ENV_MODEL,
     ENV_PROXY_URL,
+    ENV_REQUEST_TIMEOUT,
     ENV_VERIFIER_MODEL,
     MAX_TOOL_ITERATIONS,
     set_base_dir,
@@ -220,6 +221,14 @@ def main() -> None:
     # the model name server-side via its own LLM_CLI_MODEL env var.
     model = args.model or os.environ.get(ENV_MODEL, "")
 
+    # ── Resolve request timeout ─────────────────────────────────────
+    # Priority: 1) --request-timeout flag (already parsed with a default),
+    #            2) LLM_CLI_REQUEST_TIMEOUT env var, 3) built-in default.
+    request_timeout = args.request_timeout
+    env_timeout = os.environ.get(ENV_REQUEST_TIMEOUT, "").strip()
+    if env_timeout.isdigit():
+        request_timeout = int(env_timeout)
+
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
@@ -244,7 +253,7 @@ def main() -> None:
             model=model,
             api_url=api_url,
             api_key=api_key,
-            timeout=args.request_timeout,
+            timeout=request_timeout,
         ) as client,
         verifier,
     ):
