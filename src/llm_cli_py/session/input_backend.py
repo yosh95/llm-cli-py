@@ -70,6 +70,11 @@ class PromptToolkitBackend(InputBackend):
             enable_open_in_editor=True,
             vi_mode=False,
             complete_while_typing=False,
+            # Allow Ctrl+Z to suspend the process to the background (like a
+            # plain terminal / ``input()`` would). Without this, prompt_toolkit
+            # binds Ctrl+Z to inserting a literal ^Z character instead, so the
+            # process can never be suspended with Ctrl+Z.
+            enable_suspend=True,
         )
 
     def prompt(self, text: str) -> str:
