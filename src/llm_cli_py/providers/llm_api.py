@@ -85,6 +85,12 @@ class LlmApiClient(LlmClient):
         self._timeout = timeout
         self._disable_reasoning = disable_reasoning
         self._session = requests.Session()
+        # Do not reuse keep-alive connections. This CLI makes one sequential chat
+        # request per turn (no parallel assets), so keep-alive saves nothing while
+        # leaving a stale idle pool connection vulnerable to silent drops in the
+        # network path (NAT/proxy/cloud-LB), which makes the first request after a
+        # long idle hang until timeout. Close the connection each request instead.
+        self._session.headers["Connection"] = "close"
         if self._api_key:
             self._session.headers.update(
                 {

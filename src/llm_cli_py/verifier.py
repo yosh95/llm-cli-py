@@ -98,6 +98,9 @@ class Verifier:
         self._timeout = timeout
         self._enabled = True
         self._session = requests.Session()
+        # No keep-alive reuse (see LlmApiClient): one sequential request per turn,
+        # so close the connection each request to avoid stale idle pool connections.
+        self._session.headers["Connection"] = "close"
         if self._api_key:
             self._session.headers.update(
                 {
