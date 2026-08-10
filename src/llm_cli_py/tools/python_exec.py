@@ -70,13 +70,17 @@ def _check_dangerous_subprocess(code: str) -> str | None:
 
 def execute_python(
     code: str,
-    timeout: int | None = None,
+    execution_timeout_seconds: int | None = None,
 ) -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
     Args:
         code: The Python code to execute.
-        timeout: Maximum execution time in seconds (default: 60).
+        execution_timeout_seconds: TOOL-LEVEL maximum execution time in seconds
+            (default: {DEFAULT_PYTHON_EXEC_TIMEOUT}). This is the wall-clock limit on
+            the whole execution, applied by the tool itself -- NOT a code-level
+            subprocess timeout. To control the runtime use this parameter, do NOT
+            rely on subprocess.run(timeout=...) inside the code.
 
     Returns:
         ExecResult on completion, ToolError on failure.
@@ -91,7 +95,11 @@ def execute_python(
         tmp.write(code)
 
     try:
-        exec_timeout = timeout if timeout is not None else DEFAULT_PYTHON_EXEC_TIMEOUT
+        exec_timeout = (
+            execution_timeout_seconds
+            if execution_timeout_seconds is not None
+            else DEFAULT_PYTHON_EXEC_TIMEOUT
+        )
         result = subprocess.run(
             [sys.executable, str(tmp_path)],
             capture_output=True,
@@ -128,9 +136,14 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
             "type": "string",
             "description": "The Python code to execute. Use 'print()' for output.",
         },
-        "timeout": {
+        "execution_timeout_seconds": {
             "type": "integer",
-            "description": f"Maximum execution time in seconds. Default: {DEFAULT_PYTHON_EXEC_TIMEOUT}.",
+            "description": (
+                "TOOL-LEVEL max execution time in seconds (default: "
+                f"{DEFAULT_PYTHON_EXEC_TIMEOUT}). Wall-clock limit on the WHOLE "
+                "execution, enforced by the tool. Do NOT set subprocess(timeout=...) "
+                "inside the code to control runtime."
+            ),
         },
     },
     "required": ["code"],
@@ -139,10 +152,13 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
 PYTHON_TOOL_DESCRIPTION = (
     "Execute Python code in a sandboxed subprocess and return stdout/stderr.\n\n"
     "## Timeout\n"
-    f"Execution is limited to {DEFAULT_PYTHON_EXEC_TIMEOUT} seconds.\n"
+    f"Execution is limited to {DEFAULT_PYTHON_EXEC_TIMEOUT} seconds at the TOOL level.\n"
     "Long-running operations (e.g. infinite loops, heavy computations) "
-    "will be terminated and return an error.\n"
-    "You can override this timeout by passing the `timeout` parameter.\n\n"
+    "will be terminated by the tool and return an error.\n"
+    "To change this limit, pass the tool-level `execution_timeout_seconds` parameter.\n"
+    "This is a TOOL-level wall-clock limit, NOT a Python subprocess timeout. "
+    "Setting subprocess.run(timeout=...) inside the code will NOT reliably stop "
+    "the whole execution -- the tool-level parameter is the one that enforces the limit.\n\n"
     "## subprocess.run / Popen Warning\n"
     "Do NOT combine shell=True with a list of arguments. "
     "This will cause the process to hang.\n\n"
