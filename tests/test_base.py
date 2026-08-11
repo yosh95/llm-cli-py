@@ -45,4 +45,4 @@ class TestLlmClientBase:
     def test_send_is_abstract(self) -> None:
         """Verify that LlmClient.send is abstract and must be overridden."""
         with pytest.raises(TypeError):
-            LlmClient(model="test")  # type: ignore[abstract]
+            LlmClient(model="test")

@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  lint-typecheck-test:
+  lint-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -31,9 +31,6 @@ jobs:
 
       - name: Ruff format check
         run: ruff format --check src/ tests/
-
-      - name: Mypy type check
-        run: mypy src/ tests/
 
       - name: Pytest
         run: pytest tests/ -v

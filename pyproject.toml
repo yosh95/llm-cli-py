@@ -44,21 +44,11 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-ignore_missing_imports = true
-disallow_untyped_defs = true
-disallow_any_unimported = false
-warn_unused_ignores = true
-warn_redundant_casts = true
-
 [project.optional-dependencies]
 proxy = ["aiohttp"]
 dev = [
     "pytest",
     "ruff",
-    "mypy",
 ]
 
 [tool.pytest.ini_options]

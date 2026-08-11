@@ -134,9 +134,9 @@ class TestFormatToolResultEdgeCases:
         assert "2. Second" in output
 
     def test_format_unknown_type(self) -> None:
-        output = format_tool_result({"custom": "data"})  # type: ignore[arg-type]
+        output = format_tool_result({"custom": "data"})
         assert '"custom": "data"' in output
 
     def test_format_none_result(self) -> None:
-        output = format_tool_result(None)  # type: ignore[arg-type]
+        output = format_tool_result(None)
         assert "null" in output or "None" in output

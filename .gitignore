@@ -23,6 +23,5 @@ Thumbs.db
 ~/.llm-cli-py/
 
 # Tool caches
-.mypy_cache/
 .pytest_cache/
 .ruff_cache/

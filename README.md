@@ -185,9 +185,6 @@ pip install -e ".[proxy,dev]"
 # Run tests
 pytest
 
-# Type check
-mypy src
-
 # Lint
 ruff check src
 ```

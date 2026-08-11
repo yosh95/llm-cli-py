@@ -437,7 +437,7 @@ async def handle_connect(request: web.Request) -> web.StreamResponse:
     transport.write(resp_headers)
 
     raw_parser = _RawDataParser()
-    request.protocol.set_parser(raw_parser, data_received_cb=lambda: None)  # type: ignore[arg-type]
+    request.protocol.set_parser(raw_parser, data_received_cb=lambda: None)
     request.protocol.keep_alive(False)
 
     log.info(f"CONNECT tunnel established: {host}:{port}, forwarding data...")
