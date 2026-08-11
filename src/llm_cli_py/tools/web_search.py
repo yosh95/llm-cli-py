@@ -125,9 +125,12 @@ def web_search(
                 time.sleep(2**attempt)
             continue
 
-    return ToolError(
-        error=f"Search failed after {max_retries} attempts: {last_error}",
+    error_msg = (
+        f"Search failed after {max_retries} attempts: {last_error}\n"
+        "Try re-running web_search with a simpler, more specific query, "
+        "or retry later if this looks like a transient network/rate-limit issue."
     )
+    return ToolError(error=error_msg)
 
 
 # Tool schema definition
