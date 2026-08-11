@@ -233,8 +233,9 @@ class TestVerifierIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "approved" in captured.out.lower()
-        assert "Safe operation" in captured.out
+        assert "Verifier approved 'safe_tool'." in captured.out
+        # Since the verifier approved the call, the tool must be executed.
+        assert "Executing tool: safe_tool" in captured.out
 
     def test_verifier_rejects_tool_user_overrides(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
@@ -261,7 +262,7 @@ class TestVerifierIntegration:
             session.process_and_print([DataSource(text="Run code")])
 
         captured = capsys.readouterr()
-        assert "rejected" in captured.out.lower()
+        assert "Executing tool" in captured.out
         assert "User override" in captured.out
 
     def test_verifier_rejects_user_skips(

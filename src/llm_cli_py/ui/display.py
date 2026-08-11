@@ -50,7 +50,7 @@ def print_block(content: str, title: str | None = None) -> None:
 def print_assistant(text: str) -> None:
     """Display the assistant's final answer with a clear, borderless label."""
     print_rule()
-    print_block(text, title="\U0001f916 Assistant")
+    print_block(text, title="\U0001f600 Assistant")
 
 
 def stream_start(title: str) -> None:

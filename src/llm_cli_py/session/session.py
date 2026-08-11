@@ -157,7 +157,7 @@ class ActiveSession:
 
                 def on_content(delta: str, _st: StreamState = verifier_state) -> None:
                     if not _st.answer_open:
-                        ui.display.stream_start("\U0001f3db\ufe0f Verifier:")
+                        ui.display.stream_start("Verifier:")
                         _st.answer_open = True
                     ui.display.stream_text(delta)
 
@@ -172,10 +172,8 @@ class ActiveSession:
 
                 ui.display.print_rule()
                 if not approved:
-                    ui.display.report_warning(f"Verifier rejected '{tc.name}': {reason}")
-
                     raw_input_text = self.ctx.backend.prompt(
-                        "\u2753 Execute anyway? [Y/n or feedback] "
+                        f"\U0001f91a Verifier rejected '{tc.name}'. Execute anyway? [Y/n or feedback] "
                     ).strip()
                     user_confirmation = raw_input_text.lower()
                     if user_confirmation in ("", "y", "yes"):
@@ -201,7 +199,7 @@ class ActiveSession:
                             )
                         continue
                 else:
-                    ui.display.report_success(f"Verifier approved '{tc.name}': {reason}")
+                    ui.display.report_success(f"Verifier approved '{tc.name}'.")
 
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
