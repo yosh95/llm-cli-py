@@ -115,7 +115,7 @@ class ActiveSession:
 
         def on_text(delta: str) -> None:
             if not state.answer_open:
-                ui.display.stream_start("\U0001f916 Assistant:")
+                ui.display.stream_start("\U0001f600 Assistant:")
                 state.answer_open = True
             ui.display.stream_text(delta)
 
