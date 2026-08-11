@@ -269,7 +269,7 @@ class TestLlmApiClient:
             api_key="key",
         )
         body = client._build_request([{"role": "user", "content": "hi"}], [])
-        assert body["reasoning"] == {"enabled": False}
+        assert body["reasoning"] == {"enabled": False, "effort": "none"}
 
     def test_build_request_disables_reasoning_for_ollama(self) -> None:
         client = LlmApiClient(

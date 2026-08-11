@@ -43,14 +43,14 @@ def reasoning_disable_params(api_url: str) -> dict[str, Any]:
     The provider is detected from the API base URL so the correct parameter is
     sent regardless of which model is used:
 
-    - OpenRouter: ``reasoning: {"enabled": false}``
+    - OpenRouter: ``reasoning: {"enabled": false, "effort": "none"}``
     - Ollama / Ollama Cloud (OpenAI-compatible ``/v1`` endpoint):
       ``reasoning_effort: "none"`` (plus ``think: false`` for native API)
     - Generic OpenAI-compatible endpoint: ``reasoning_effort: "none"``
     """
     url = (api_url or "").lower()
     if "openrouter" in url:
-        return {"reasoning": {"enabled": False}}
+        return {"reasoning": {"enabled": False, "effort": "none"}}
     if "ollama" in url or "11434" in url:
         return {"reasoning_effort": "none", "think": False}
     return {"reasoning_effort": "none"}
