@@ -286,7 +286,7 @@ class TestVerifier:
         assert verifier.is_configured is False
 
     @patch("llm_cli_py.utils.http.requests.Session.post")
-    def test_verify_streams_reasoning_and_content(self, mock_post: MagicMock) -> None:
+    def test_verify_streams_content(self, mock_post: MagicMock) -> None:
         import json as _json
 
         def chunk(delta: dict[str, str]) -> str:
@@ -295,6 +295,8 @@ class TestVerifier:
         stream_resp = MagicMock()
         stream_resp.status_code = 200
         stream_resp.iter_lines.return_value = [
+            # Reasoning deltas are received from the provider but, with reasoning
+            # display removed, they are ignored by the verifier.
             chunk({"reasoning_content": "Checking "}).encode(),
             chunk({"reasoning_content": "safety"}).encode(),
             chunk({"content": '{"approved": true, "reason": "read only"}'}).encode(),
@@ -308,18 +310,15 @@ class TestVerifier:
             model="gpt-4o-mini",
         )
         tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
-        reasoning: list[str] = []
         content: list[str] = []
         approved, reason = verifier.verify(
             tool_call,
             [],
-            on_reasoning=reasoning.append,
             on_content=content.append,
         )
 
         assert approved is True
         assert reason == "read only"
-        assert reasoning == ["Checking ", "safety"]
         assert content == ['{"approved": true, "reason": "read only"}']
         # Request was sent with stream=True
         assert mock_post.call_args.kwargs["json"]["stream"] is True

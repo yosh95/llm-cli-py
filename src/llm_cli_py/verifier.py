@@ -166,10 +166,9 @@ class Verifier:
     def _consume_stream(
         self,
         resp: Any,
-        on_reasoning: Callable[[str], None] | None,
         on_content: Callable[[str], None] | None,
     ) -> str:
-        """Consume an SSE token stream, surfacing reasoning/content deltas.
+        """Consume an SSE token stream, surfacing content deltas.
 
         Returns the fully accumulated assistant content (used to parse the
         verifier's JSON verdict after the stream completes).
@@ -199,11 +198,6 @@ class Verifier:
                 continue
             delta = choices[0].get("delta") or {}
 
-            # Reasoning trace: providers disagree on the field name.
-            reasoning = delta.get("reasoning") or delta.get("reasoning_content")
-            if reasoning and on_reasoning:
-                on_reasoning(reasoning)
-
             content = delta.get("content")
             if content:
                 content_parts.append(content)
@@ -216,14 +210,12 @@ class Verifier:
         self,
         tool_call: ToolCall,
         conversation_context: list[dict[str, Any]],
-        on_reasoning: Callable[[str], None] | None = None,
         on_content: Callable[[str], None] | None = None,
     ) -> tuple[bool, str]:
         """Verify a tool call. Returns (approved, reason).
 
-        When ``on_reasoning`` or ``on_content`` is provided, the verifier
-        request is streamed (SSE) and each reasoning / content delta is
-        surfaced live through those callbacks, mirroring the main LLM path.
+        When ``on_content`` is provided, the verifier request is streamed (SSE)
+        and each content delta is surfaced live, mirroring the main LLM path.
         If no callback is given, a plain non-streaming request is used.
         """
         if not self._enabled:
@@ -253,12 +245,12 @@ class Verifier:
         )
 
         try:
-            # Stream when callbacks want live output; any call provides an
+            # Stream when the callback wants live output; any call provides an
             # immediate non-streaming fallback so verification always finishes.
-            stream = on_reasoning is not None or on_content is not None
+            stream = on_content is not None
             resp = self._request(messages, stream=stream)
             if stream:
-                content = self._consume_stream(resp, on_reasoning, on_content)
+                content = self._consume_stream(resp, on_content)
                 if not content:
                     resp = self._request(messages, stream=False)
                     content = self._read_content(resp)

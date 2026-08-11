@@ -111,19 +111,9 @@ class ActiveSession:
         tool_schemas: list[ToolSchema],
         state: StreamState,
     ) -> LlmResponse:
-        """Send a streaming turn, displaying reasoning / answer deltas live."""
-
-        def on_reasoning(delta: str) -> None:
-            if not state.reasoning_open:
-                ui.display.stream_start("\U0001f9e0 Reasoning (thinking process):")
-                state.reasoning_open = True
-            ui.display.stream_reasoning(delta)
+        """Send a streaming turn, displaying answer deltas live."""
 
         def on_text(delta: str) -> None:
-            # If reasoning just finished, close it before the answer.
-            if state.reasoning_open:
-                ui.display.stream_end()
-                state.reasoning_open = False
             if not state.answer_open:
                 ui.display.stream_start("\U0001f916 Assistant:")
                 state.answer_open = True
@@ -134,7 +124,6 @@ class ActiveSession:
             tool_schemas,
             stream=True,
             on_text=on_text,
-            on_reasoning=on_reasoning,
         )
 
     def _finalize_streamed(self, state: StreamState, response: LlmResponse) -> None:
@@ -143,13 +132,10 @@ class ActiveSession:
         A provider may return a non-streaming fallback (e.g. re-requested tool
         calls) or an error body that produced no deltas; display it once here.
         """
-        if state.reasoning_open or state.answer_open:
+        if state.answer_open:
             ui.display.stream_end()
-        if not state.reasoning_open and not state.answer_open:
-            if response.reasoning:
-                ui.display.print_reasoning(response.reasoning)
-            if response.text:
-                ui.display.print_assistant(response.text)
+        elif response.text:
+            ui.display.print_assistant(response.text)
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls (with verification and optional user confirmation)."""
@@ -165,20 +151,11 @@ class ActiveSession:
                     {"role": m.role.value, "content": m.content} for m in self.client.state.conversation[-5:]
                 ]
 
-                # Stream the verifier's reasoning and response live, mirroring
-                # how the main LLM turn is displayed.
+                # Stream the verifier's response live, mirroring how the main
+                # LLM turn is displayed.
                 verifier_state = StreamState()
 
-                def on_reasoning(delta: str, _st: StreamState = verifier_state) -> None:
-                    if not _st.reasoning_open:
-                        ui.display.stream_start("\U0001f9e0 Verifier reasoning:")
-                        _st.reasoning_open = True
-                    ui.display.stream_reasoning(delta)
-
                 def on_content(delta: str, _st: StreamState = verifier_state) -> None:
-                    if _st.reasoning_open:
-                        ui.display.stream_end()
-                        _st.reasoning_open = False
                     if not _st.answer_open:
                         ui.display.stream_start("\U0001f3db\ufe0f Verifier:")
                         _st.answer_open = True
@@ -187,11 +164,10 @@ class ActiveSession:
                 approved, reason = self.ctx.verifier.verify(
                     tc,
                     ctx_messages,
-                    on_reasoning=on_reasoning,
                     on_content=on_content,
                 )
 
-                if verifier_state.reasoning_open or verifier_state.answer_open:
+                if verifier_state.answer_open:
                     ui.display.stream_end()
 
                 ui.display.print_rule()

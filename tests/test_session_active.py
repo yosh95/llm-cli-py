@@ -81,9 +81,12 @@ class TestProcessAndPrint:
         captured = capsys.readouterr()
         assert "Hello back!" in captured.out
 
-    def test_response_with_reasoning(
+    def test_response_with_reasoning_not_displayed(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        # Reasoning is parsed/kept in the model for multi-turn history, but it
+        # is intentionally NOT printed to the terminal. Only the final answer
+        # should appear.
         with patch.object(
             session.client,
             "send",
@@ -92,7 +95,8 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Hi")])
         captured = capsys.readouterr()
         assert "Final answer" in captured.out
-        assert "I think..." in captured.out
+        assert "I think..." not in captured.out
+        assert "Reasoning" not in captured.out
 
     def test_tool_call_then_text_response(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
@@ -287,7 +291,7 @@ class TestVerifierIntegration:
         captured = capsys.readouterr()
         assert "skipped" in captured.out.lower()
 
-    def test_verifier_streams_reasoning_and_response(
+    def test_verifier_streams_response(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
         verifier = MagicMock(spec=Verifier)
@@ -333,12 +337,12 @@ class TestVerifierIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Verifier reasoning:" in captured.out
-        assert "Thinking about it..." in captured.out
+        # Reasoning is no longer streamed/displayed by the session.
+        assert "Verifier reasoning:" not in captured.out
+        assert "Thinking about it..." not in captured.out
         assert "Verifier:" in captured.out
-        # Streaming callbacks were wired through to verify()
+        # The content streaming callback was wired through to verify().
         kwargs = verifier.verify.call_args.kwargs
-        assert kwargs["on_reasoning"] is not None
         assert kwargs["on_content"] is not None
 
     def test_verifier_rejected_with_feedback(

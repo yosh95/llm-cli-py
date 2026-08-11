@@ -9,19 +9,16 @@ import pytest
 
 from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem
 from llm_cli_py.ui.display import (
-    _collapse_reasoning,
     format_tool_result,
     print_assistant,
     print_block,
     print_info,
-    print_reasoning,
     print_tool_call,
     print_tool_result,
     report_error,
     report_info,
     report_success,
     report_warning,
-    stream_reasoning,
 )
 
 
@@ -39,45 +36,6 @@ class TestPrintFunctions:
         captured = capsys.readouterr()
         assert "Assistant" in captured.out
         assert "Hello world" in captured.out
-
-    def test_print_reasoning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_reasoning("I think therefore I am")
-        captured = capsys.readouterr()
-        assert "Reasoning" in captured.out
-        assert "I think" in captured.out
-
-    def test_print_reasoning_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_reasoning("")
-        captured = capsys.readouterr()
-        assert captured.out == ""
-
-    def test_print_reasoning_whitespace(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_reasoning("   \n  ")
-        captured = capsys.readouterr()
-        assert captured.out == ""
-
-    def test_print_reasoning_collapses_newlines(self, capsys: pytest.CaptureFixture[str]) -> None:
-        # DeepSeek R1 style: one token per line, newline followed by a space
-        print_reasoning("the\n object\n is\n immutable")
-        captured = capsys.readouterr()
-        assert "the object is immutable" in captured.out
-        assert "\n object" not in captured.out
-
-    def test_print_reasoning_collapses_double_spaces(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_reasoning("the\n  object\n\n  is")
-        captured = capsys.readouterr()
-        assert "the object is" in captured.out
-        assert "  " not in captured.out
-
-    def test_collapse_reasoning(self) -> None:
-        assert _collapse_reasoning("a\n b\n\n c") == "a b c"
-        assert _collapse_reasoning("a\n  b\n   c") == "a b c"
-        assert _collapse_reasoning("plain text") == "plain text"
-
-    def test_stream_reasoning_collapses(self, capsys: pytest.CaptureFixture[str]) -> None:
-        stream_reasoning("the\n object")
-        captured = capsys.readouterr()
-        assert captured.out == "the object"
 
     def test_print_info(self, capsys: pytest.CaptureFixture[str]) -> None:
         print_info("Model", "gpt-4o")
