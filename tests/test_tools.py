@@ -218,7 +218,7 @@ class TestWebSearchTool:
                 "Accept-Encoding": "gzip",
                 "X-Subscription-Token": "test-key-123",
             },
-            timeout=60,
+            timeout=30,
         )
 
     def test_empty_results(self) -> None:
@@ -410,7 +410,7 @@ class TestWebSearchTool:
             "http://proxy:8080/web_search",
             json={"query": "proxy test"},
             headers={"Content-Type": "application/json"},
-            timeout=60,
+            timeout=30,
         )
 
 

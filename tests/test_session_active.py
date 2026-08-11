@@ -432,7 +432,7 @@ class TestMaxToolIterations:
         assert send_call_count <= max_iter + 1
 
     def test_max_iterations_default_value(self) -> None:
-        assert MAX_TOOL_ITERATIONS == 500
+        assert MAX_TOOL_ITERATIONS == 300
 
     def test_max_iterations_custom_value(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Custom max_tool_iterations should be respected."""

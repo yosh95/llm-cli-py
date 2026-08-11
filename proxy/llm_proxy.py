@@ -349,7 +349,7 @@ async def handle_web_search(request: web.Request) -> web.StreamResponse:
         headers=brave_headers,
         body=b"",
         params=params,
-        timeout=60,
+        timeout=30,
         service="Brave Search",
     )
 
