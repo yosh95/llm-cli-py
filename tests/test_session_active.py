@@ -53,7 +53,13 @@ class TestProcessAndPrint:
 
     def test_no_model_configured(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         session.client.state.model = ""
-        session.process_and_print([DataSource(text="Hello")])
+        # HTTP request would be attempted; mock the client to keep it fast.
+        with patch.object(
+            session.client,
+            "send",
+            return_value=LlmResponse(text="Hello from LLM"),
+        ):
+            session.process_and_print([DataSource(text="Hello")])
         captured = capsys.readouterr()
         assert "No model specified locally" in captured.out
 

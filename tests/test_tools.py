@@ -302,6 +302,7 @@ class TestWebSearchTool:
         with (
             patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response),
+            patch("llm_cli_py.tools.web_search.time.sleep"),
         ):
             result = web_search(query="test")
 

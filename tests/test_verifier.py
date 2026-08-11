@@ -204,7 +204,8 @@ class TestVerifier:
         assert "confirm manually" in reason.lower()
 
     @patch("llm_cli_py.utils.http.requests.Session.post")
-    def test_verify_timeout_reports_timeout(self, mock_post: MagicMock) -> None:
+    @patch("llm_cli_py.utils.http.time.sleep")
+    def test_verify_timeout_reports_timeout(self, _mock_sleep: MagicMock, mock_post: MagicMock) -> None:
         mock_post.side_effect = requests.exceptions.Timeout("timed out")
 
         verifier = Verifier(
@@ -224,7 +225,10 @@ class TestVerifier:
         assert "confirm manually" in reason.lower()
 
     @patch("llm_cli_py.utils.http.requests.Session.post")
-    def test_verify_other_request_error_reports_failure(self, mock_post: MagicMock) -> None:
+    @patch("llm_cli_py.utils.http.time.sleep")
+    def test_verify_other_request_error_reports_failure(
+        self, _mock_sleep: MagicMock, mock_post: MagicMock
+    ) -> None:
         mock_post.side_effect = requests.exceptions.ConnectionError("boom")
 
         verifier = Verifier(
