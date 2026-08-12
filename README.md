@@ -78,7 +78,6 @@ llm-cli-py --disable-reasoning ...
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
 | `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
 | `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
-| `LLM_CLI_REQUEST_TIMEOUT` | Override the LLM API request timeout in seconds (default 1800). Useful for cloud reasoning models that can take minutes before their first token. |
 | `LLM_CLI_DISABLE_REASONING` | Disable model thinking/reasoning for all providers and models. Set to `1`/`true` (default) to turn thinking off, or `0`/`false` to keep it on. Can be overridden with `--disable-reasoning` / `--enable-reasoning`. |
 | `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
 | `PROXY_PORT` | Port the proxy listens on (default `8080`). |

@@ -69,16 +69,6 @@ class TestCliParser:
         args = parser.parse_args([])
         assert args.verifier_model is None
 
-    def test_timeout_flags(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(
-            [
-                "--request-timeout",
-                "60",
-            ]
-        )
-        assert args.request_timeout == 60
-
     def test_sources(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["-s", "hello", "-s", "world"])

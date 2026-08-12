@@ -26,7 +26,6 @@ from .consts import (
     ENV_API_URL,
     ENV_MODEL,
     ENV_PROXY_URL,
-    ENV_REQUEST_TIMEOUT,
     ENV_VERIFIER_MODEL,
     MAX_TOOL_ITERATIONS,
 )
@@ -82,12 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Proxy URL. Overrides {ENV_PROXY_URL} env var. "
         "When set, both LLM API and Brave Search requests go through this proxy. "
         "The proxy handles API key and model injection server-side.",
-    )
-    parser.add_argument(
-        "--request-timeout",
-        type=int,
-        default=DEFAULT_REQUEST_TIMEOUT,
-        help="Request timeout in seconds",
     )
     parser.add_argument(
         "--approval-mode",
@@ -234,13 +227,9 @@ def main() -> None:
     # the model name server-side via its own LLM_CLI_MODEL env var.
     model = args.model or os.environ.get(ENV_MODEL, "")
 
-    # ── Resolve request timeout ─────────────────────────────────────
-    # Priority: 1) --request-timeout flag (already parsed with a default),
-    #            2) LLM_CLI_REQUEST_TIMEOUT env var, 3) built-in default.
-    request_timeout = args.request_timeout
-    env_timeout = os.environ.get(ENV_REQUEST_TIMEOUT, "").strip()
-    if env_timeout.isdigit():
-        request_timeout = int(env_timeout)
+    # ── Request timeout ────────────────────────────────────────────
+    # Built-in default is used (no CLI flag / env override).
+    request_timeout = DEFAULT_REQUEST_TIMEOUT
 
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
