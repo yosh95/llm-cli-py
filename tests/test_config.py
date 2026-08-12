@@ -42,7 +42,7 @@ class TestConsts:
     def test_proxy_url_env_var(self) -> None:
         assert ENV_PROXY_URL == "LLM_CLI_PROXY_URL"
 
-    def test_max_tool_iterations_is_300(self) -> None:
+    def test_max_tool_iterations_is_200(self) -> None:
         from llm_cli_py.consts import MAX_TOOL_ITERATIONS
 
-        assert MAX_TOOL_ITERATIONS == 300
+        assert MAX_TOOL_ITERATIONS == 200
