@@ -16,7 +16,7 @@ class TestCliParser:
         assert args.command is None
         assert args.sources == []
         assert args.model is None
-        assert args.disable_verifier is False
+        assert args.approval_mode == "verifier"
         assert args.plain_input is False
 
     def test_model(self) -> None:
@@ -39,10 +39,20 @@ class TestCliParser:
         args = parser.parse_args([])
         assert args.api_key is None
 
-    def test_disable_verifier(self) -> None:
+    def test_approval_mode_default(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["--disable-verifier"])
-        assert args.disable_verifier is True
+        args = parser.parse_args([])
+        assert args.approval_mode == "verifier"
+
+    def test_approval_mode_manual(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--approval-mode", "manual"])
+        assert args.approval_mode == "manual"
+
+    def test_approval_mode_auto(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--approval-mode", "auto"])
+        assert args.approval_mode == "auto"
 
     def test_plain_input_flag(self) -> None:
         parser = build_parser()

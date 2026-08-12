@@ -63,7 +63,19 @@ ENV_MODEL = "LLM_CLI_MODEL"
 """Environment variable for the default LLM model."""
 
 ENV_VERIFIER_MODEL = "LLM_CLI_VERIFIER_MODEL"
-"""Environment variable for the verifier model (separate from the main LLM)."""
+"""Verifier model (separate from the main LLM)."""
+
+# ── Approval mode constants ──────────────────────────────────────
+# Controls how tool calls are approved before execution:
+#   APPROVAL_MODE_VERIFIER -- use the LLM-based verifier (default).
+#   APPROVAL_MODE_MANUAL  -- no verifier; ask the human to approve every
+#                            tool call (HITL / human-in-the-loop).
+#   APPROVAL_MODE_AUTO    -- no verifier; auto-approve every tool call.
+APPROVAL_MODE_VERIFIER = "verifier"
+APPROVAL_MODE_MANUAL = "manual"
+APPROVAL_MODE_AUTO = "auto"
+
+APPROVAL_MODES = (APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO)
 
 ENV_REQUEST_TIMEOUT = "LLM_CLI_REQUEST_TIMEOUT"
 """Environment variable overriding the LLM API request timeout in seconds."""

@@ -15,6 +15,9 @@ from . import __version__
 from .commands.openrouter import add_subparser as add_openrouter_subparser
 from .commands.openrouter import run_openrouter
 from .consts import (
+    APPROVAL_MODE_AUTO,
+    APPROVAL_MODE_MANUAL,
+    APPROVAL_MODE_VERIFIER,
     DEFAULT_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_URL_FETCH_TIMEOUT,
@@ -94,9 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Request timeout in seconds",
     )
     parser.add_argument(
-        "--disable-verifier",
-        action="store_true",
-        help="Disable the verifier (all tool calls approved automatically)",
+        "--approval-mode",
+        choices=[APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO],
+        default=APPROVAL_MODE_VERIFIER,
+        help=(
+            "How tool calls are approved before execution: "
+            f"'{APPROVAL_MODE_VERIFIER}' (default) uses the LLM-based verifier; "
+            f"'{APPROVAL_MODE_MANUAL}' skips the verifier and asks the human to "
+            "approve every tool call (HITL); "
+            f"'{APPROVAL_MODE_AUTO}' skips the verifier and auto-approves everything."
+        ),
     )
     parser.add_argument(
         "--verifier-model",
@@ -255,9 +265,17 @@ def main() -> None:
         model=verifier_model,
         timeout=DEFAULT_VERIFIER_TIMEOUT,
     )
-    if args.disable_verifier:
+    # The verifier is only used when approval_mode == "verifier". For "manual"
+    # and "auto" it is left disabled at the session level (see SessionContext).
+    if args.approval_mode == APPROVAL_MODE_VERIFIER:
+        verifier.set_enabled(True)
+        ui_display.report_info("Approval mode: verifier (LLM-based verification).")
+    else:
         verifier.set_enabled(False)
-        ui_display.report_info("Verifier disabled (--disable-verifier). All tool calls allowed.")
+        if args.approval_mode == APPROVAL_MODE_MANUAL:
+            ui_display.report_info("Approval mode: manual (HITL - you approve every tool call).")
+        else:
+            ui_display.report_info("Approval mode: auto (all tool calls auto-approved).")
 
     # ── Resolve reasoning toggle ────────────────────────────────────
     # Priority: --enable-reasoning > --disable-reasoning > env var (default off)
@@ -291,6 +309,7 @@ def main() -> None:
             verifier=verifier,
             max_tool_iterations=args.max_tool_iterations,
             backend=PlainInputBackend(),
+            approval_mode=args.approval_mode,
         )
         session = ActiveSession(client, ctx)
 

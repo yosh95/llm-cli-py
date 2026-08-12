@@ -11,7 +11,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .. import ui
-from ..consts import history_file_path
+from ..consts import APPROVAL_MODE_VERIFIER, history_file_path
 from ..models import DataSource
 from .input_backend import InputBackend, create_backend
 from .session import ActiveSession
@@ -27,7 +27,7 @@ class SlashCommandCompleter(Completer):
             "/clear": "Clear conversation history",
             "/info": "Show session information",
             "/dump": "Dump conversation history as TOML to stdout",
-            "/verifier": "Toggle verifier on/off",
+            "/verifier": "Toggle verifier on/off (only affects --approval-mode verifier)",
         }
 
     def get_completions(
@@ -79,7 +79,7 @@ def _cmd_help(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
         ("/clear, /c", "Clear conversation history"),
         ("/info, /i", "Show session info (API URL, model, verifier, tools, token usage)"),
         ("/dump", "Dump conversation history as TOML to stdout"),
-        ("/verifier [on|off], /v", "Toggle verifier"),
+        ("/verifier [on|off], /v", "Toggle verifier (only when --approval-mode verifier)"),
     ]
     for cmd, desc in commands:
         ui.display.print_info(cmd, desc)
@@ -102,13 +102,14 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     ui.display.print_info("API URL", api_url if api_url else "not configured")
     display_model = state.model if state.model else "not specified (proxy will inject)"
     ui.display.print_info("Model", display_model)
+    ui.display.print_info("Approval mode", session.ctx.approval_mode)
     v = session.ctx.verifier
-    if v and v.enabled:
-        ui.display.print_info("Verifier", "Enabled")
-    elif v and not v.enabled:
-        ui.display.print_info("Verifier", "Disabled (all tool calls allowed)")
-    else:
+    if v is None:
         ui.display.print_info("Verifier", "Not configured")
+    elif session.ctx.approval_mode == APPROVAL_MODE_VERIFIER:
+        ui.display.print_info("Verifier", "Enabled" if v.enabled else "Disabled")
+    else:
+        ui.display.print_info("Verifier", "Unused (approval mode is not 'verifier')")
     tools = session.ctx.tool_registry.get_tool_names()
     ui.display.print_info("Available Tools", ", ".join(tools) if tools else "None")
     ui.display.print_info("Messages", str(len(state.conversation)))
@@ -140,6 +141,13 @@ def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
 def _cmd_verifier(session: ActiveSession, args: str) -> str | None:
     """Toggle the verifier on/off."""
     v = session.ctx.verifier
+    if session.ctx.approval_mode != APPROVAL_MODE_VERIFIER:
+        ui.display.report_warning(
+            f"Approval mode is '{session.ctx.approval_mode}', not 'verifier'. "
+            "Restart with --approval-mode verifier to use the verifier toggle."
+        )
+        return None
+
     if v is None:
         ui.display.report_warning("Verifier is not configured.")
         return None

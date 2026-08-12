@@ -222,7 +222,7 @@ class Verifier:
             return True, "Verifier disabled"
 
         if not self.is_configured:
-            return False, "Verifier is not configured. Use --disable-verifier."
+            return False, "Verifier is not configured."
 
         messages = [
             {"role": "system", "content": VERIFIER_SYSTEM_PROMPT},

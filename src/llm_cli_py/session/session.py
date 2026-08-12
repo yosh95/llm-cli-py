@@ -7,7 +7,12 @@ import uuid
 
 from .. import ui
 from ..base import LlmClient
-from ..consts import MAX_TOOL_ITERATIONS
+from ..consts import (
+    APPROVAL_MODE_AUTO,
+    APPROVAL_MODE_MANUAL,
+    APPROVAL_MODE_VERIFIER,
+    MAX_TOOL_ITERATIONS,
+)
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
@@ -25,10 +30,18 @@ class SessionContext:
         verifier: Verifier | None = None,
         max_tool_iterations: int = MAX_TOOL_ITERATIONS,
         backend: InputBackend | None = None,
+        approval_mode: str = APPROVAL_MODE_VERIFIER,
     ) -> None:
         self.tool_registry = tool_registry
         self.verifier = verifier
         self.max_tool_iterations = max_tool_iterations
+        # Approval strategy for tool calls:
+        #   "verifier" -> use the LLM-based verifier (default).
+        #   "manual"   -> no verifier; prompt the human for every tool call (HITL).
+        #   "auto"     -> no verifier; auto-approve every tool call.
+        if approval_mode not in (APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO):
+            approval_mode = APPROVAL_MODE_VERIFIER
+        self.approval_mode = approval_mode
         # Backend used for interactive confirmations (e.g. verifier override).
         # Defaults to a plain input() so that automation / non-tty runs never
         # trigger prompt_toolkit's terminal manipulation unexpectedly.
@@ -58,11 +71,17 @@ class ActiveSession:
         if not self.client.state.model:
             ui.display.report_info("No model specified locally. The proxy will inject the model server-side.")
 
-        if self.ctx.verifier and self.ctx.verifier.enabled and not self.ctx.verifier.is_configured:
+        if (
+            self.ctx.approval_mode == APPROVAL_MODE_VERIFIER
+            and self.ctx.verifier
+            and self.ctx.verifier.enabled
+            and not self.ctx.verifier.is_configured
+        ):
             ui.display.report_error(
                 "Verifier is enabled but not configured. "
                 "Tool calls cannot proceed.\n"
-                "  Use --disable-verifier startup flag, or disable it with /v off."
+                "  Use --approval-mode manual/auto to skip the verifier, "
+                "or disable it with /v off."
             )
             return
 
@@ -142,64 +161,93 @@ class ActiveSession:
         for tc in tool_calls:
             ui.display.print_tool_call(tc.name, tc.arguments)
 
-            if self.ctx.verifier and self.ctx.verifier.enabled:
-                verifier_model = self.ctx.verifier.model if self.ctx.verifier.model else "LLM"
+            approved = True
+            reason = ""
+
+            if self.ctx.approval_mode == APPROVAL_MODE_MANUAL:
+                # No verifier: ask the human to approve every tool call (HITL).
                 ui.display.print_rule()
-                print(f"\U0001f50d {verifier_model} checking...")
-
-                ctx_messages = [
-                    {"role": m.role.value, "content": m.content} for m in self.client.state.conversation[-5:]
-                ]
-
-                # Stream the verifier's response live, mirroring how the main
-                # LLM turn is displayed.
-                verifier_state = StreamState()
-
-                def on_content(delta: str, _st: StreamState = verifier_state) -> None:
-                    if not _st.answer_open:
-                        ui.display.stream_start("Verifier:")
-                        _st.answer_open = True
-                    ui.display.stream_text(delta)
-
-                approved, reason = self.ctx.verifier.verify(
-                    tc,
-                    ctx_messages,
-                    on_content=on_content,
-                )
-
-                if verifier_state.answer_open:
-                    ui.display.stream_end()
-
-                ui.display.print_rule()
-                if not approved:
-                    raw_input_text = self.ctx.backend.prompt(
-                        f"\U0001f91a Verifier rejected '{tc.name}'. Execute anyway? [Y/n or feedback] "
-                    ).strip()
-                    user_confirmation = raw_input_text.lower()
-                    if user_confirmation in ("", "y", "yes"):
-                        ui.display.report_info("User override: executing tool call.")
-                    else:
-                        ui.display.report_info("Tool call skipped per user decision.")
-                        self.client.state.conversation.append(
-                            Message(
-                                role=Role.TOOL,
-                                content=f"User declined after verifier rejection: {reason}",
-                                tool_call_id=tc.id,
-                            )
+                raw_input_text = self.ctx.backend.prompt(
+                    f"\U0001f91a Approve tool call '{tc.name}'? [Y/n] "
+                ).strip()
+                user_confirmation = raw_input_text.lower()
+                if user_confirmation in ("", "y", "yes"):
+                    ui.display.report_info("User approved tool call (HITL).")
+                else:
+                    ui.display.report_info("Tool call skipped per user decision.")
+                    self.client.state.conversation.append(
+                        Message(
+                            role=Role.TOOL,
+                            content=f"User declined tool call '{tc.name}'.",
+                            tool_call_id=tc.id,
                         )
-                        if user_confirmation not in ("n", "no"):
+                    )
+                    continue
+
+            elif self.ctx.approval_mode == APPROVAL_MODE_AUTO:
+                # No verifier: auto-approve everything.
+                ui.display.report_info(f"Auto-approved '{tc.name}' (--approval-mode auto).")
+
+            else:  # APPROVAL_MODE_VERIFIER (default)
+                if self.ctx.verifier and self.ctx.verifier.enabled:
+                    verifier_model = self.ctx.verifier.model if self.ctx.verifier.model else "LLM"
+                    ui.display.print_rule()
+                    print(f"\U0001f50d {verifier_model} checking...")
+
+                    ctx_messages = [
+                        {"role": m.role.value, "content": m.content}
+                        for m in self.client.state.conversation[-5:]
+                    ]
+
+                    # Stream the verifier's response live, mirroring how the main
+                    # LLM turn is displayed.
+                    verifier_state = StreamState()
+
+                    def on_content(delta: str, _st: StreamState = verifier_state) -> None:
+                        if not _st.answer_open:
+                            ui.display.stream_start("Verifier:")
+                            _st.answer_open = True
+                        ui.display.stream_text(delta)
+
+                    approved, reason = self.ctx.verifier.verify(
+                        tc,
+                        ctx_messages,
+                        on_content=on_content,
+                    )
+
+                    if verifier_state.answer_open:
+                        ui.display.stream_end()
+
+                    ui.display.print_rule()
+                    if not approved:
+                        raw_input_text = self.ctx.backend.prompt(
+                            f"\U0001f91a Verifier rejected '{tc.name}'. Execute anyway? [Y/n or feedback] "
+                        ).strip()
+                        user_confirmation = raw_input_text.lower()
+                        if user_confirmation in ("", "y", "yes"):
+                            ui.display.report_info("User override: executing tool call.")
+                        else:
+                            ui.display.report_info("Tool call skipped per user decision.")
                             self.client.state.conversation.append(
                                 Message(
-                                    role=Role.USER,
-                                    content=(
-                                        f"[User feedback on verifier rejection for tool "
-                                        f"'{tc.name}'] {raw_input_text}"
-                                    ),
+                                    role=Role.TOOL,
+                                    content=f"User declined after verifier rejection: {reason}",
+                                    tool_call_id=tc.id,
                                 )
                             )
-                        continue
-                else:
-                    ui.display.report_success(f"Verifier approved '{tc.name}'.")
+                            if user_confirmation not in ("n", "no"):
+                                self.client.state.conversation.append(
+                                    Message(
+                                        role=Role.USER,
+                                        content=(
+                                            f"[User feedback on verifier rejection for tool "
+                                            f"'{tc.name}'] {raw_input_text}"
+                                        ),
+                                    )
+                                )
+                            continue
+                    else:
+                        ui.display.report_success(f"Verifier approved '{tc.name}'.")
 
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
