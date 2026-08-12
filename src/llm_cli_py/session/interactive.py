@@ -194,11 +194,6 @@ def run_interactive(
             touches the terminal. Safe for automation / non-tty stdin.
     """
     hist_path = history_file_path()
-    hist_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not hist_path.exists():
-        hist_path.touch()
-
     completer = SlashCommandCompleter()
     bindings = _build_key_bindings()
 

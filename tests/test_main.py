@@ -89,11 +89,6 @@ class TestCliParser:
         args = parser.parse_args(["models"])
         assert args.command == "models"
 
-    def test_base_dir(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["-D", "/custom/path"])
-        assert args.base_dir == "/custom/path"
-
     def test_version_flag_short(self, capsys: pytest.CaptureFixture[str]) -> None:
         parser = build_parser()
         with pytest.raises(SystemExit) as exc_info:

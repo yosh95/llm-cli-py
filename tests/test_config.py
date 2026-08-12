@@ -10,26 +10,16 @@ from llm_cli_py.consts import (
     ENV_MODEL,
     ENV_PROXY_URL,
     ENV_VERIFIER_MODEL,
-    get_base_dir,
-    set_base_dir,
+    history_file_path,
 )
 
 
 class TestConsts:
     """Test constants and path functions."""
 
-    def test_get_base_dir_default(self) -> None:
-        from llm_cli_py import consts
+    def test_history_file_path(self) -> None:
 
-        consts._BASE_DIR = None
-        base = get_base_dir()
-        assert base == Path.home() / ".llm-cli-py"
-
-    def test_set_base_dir(self) -> None:
-        custom = Path("/tmp/test-llm-cli-py")
-        set_base_dir(custom)
-        assert get_base_dir() == custom
-        set_base_dir(Path.home() / ".llm-cli-py")
+        assert history_file_path() == Path.home() / ".llm-cli-py-history"
 
     def test_env_var_names(self) -> None:
         assert ENV_API_KEY == "LLM_CLI_API_KEY"

@@ -29,7 +29,6 @@ from .consts import (
     ENV_REQUEST_TIMEOUT,
     ENV_VERIFIER_MODEL,
     MAX_TOOL_ITERATIONS,
-    set_base_dir,
 )
 from .models import DataSource
 from .providers.llm_api import LlmApiClient
@@ -83,12 +82,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Proxy URL. Overrides {ENV_PROXY_URL} env var. "
         "When set, both LLM API and Brave Search requests go through this proxy. "
         "The proxy handles API key and model injection server-side.",
-    )
-    parser.add_argument(
-        "-D",
-        "--base-dir",
-        default=str(Path.home() / ".llm-cli-py"),
-        help="Base directory for config and logs",
     )
     parser.add_argument(
         "--request-timeout",
@@ -194,8 +187,6 @@ def main() -> None:
 
     parser = build_parser()
     args = parser.parse_args()
-
-    set_base_dir(Path(args.base_dir))
 
     # ── Resolve API URL / Proxy URL ──────────────────────────────
     # Priority: 1) --proxy-url, 2) LLM_CLI_PROXY_URL env

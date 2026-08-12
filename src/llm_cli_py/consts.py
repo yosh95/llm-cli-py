@@ -2,25 +2,17 @@
 
 from pathlib import Path
 
-_BASE_DIR: Path | None = None
-
-
-def get_base_dir() -> Path:
-    """Get the base directory for config and logs."""
-    global _BASE_DIR
-    if _BASE_DIR is not None:
-        return _BASE_DIR
-    return Path.home() / ".llm-cli-py"
-
-
-def set_base_dir(path: Path) -> None:
-    """Set a custom base directory."""
-    global _BASE_DIR
-    _BASE_DIR = path
+_HISTORY_FILE = Path.home() / ".llm-cli-py-history"
+"""Prompt-toolkit input history file (a dotfile in the user's home dir)."""
 
 
 def history_file_path() -> Path:
-    return get_base_dir() / "history.txt"
+    """Return the path to the prompt_toolkit input-history file.
+
+    The only persisted state is the interactive prompt history, so it is
+    stored directly as a dotfile in the user's home directory.
+    """
+    return _HISTORY_FILE
 
 
 # ── Timeout constants (seconds) ────────────────────────────────────
