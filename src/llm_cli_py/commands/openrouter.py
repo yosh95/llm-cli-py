@@ -20,6 +20,20 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 """OpenRouter API base URL."""
 
+# Command aliases for the openrouter subcommand.
+OPENROUTER_ALIASES = ["or", "opr", "ort"]
+"""Short aliases for the `openrouter` subcommand name."""
+
+# Short aliases for the openrouter sub-subcommands.
+RANKINGS_ALIASES = ["r", "rank"]
+"""Short aliases for the `rankings` subcommand."""
+
+CREDITS_ALIASES = ["c", "credit"]
+"""Short aliases for the `credits` subcommand."""
+
+MODEL_ALIASES = ["m"]
+"""Short aliases for the `model` subcommand."""
+
 
 def _get_api_key() -> str:
     """Get the OpenRouter API key from environment or exit with error."""
@@ -372,17 +386,18 @@ def show_model(model_slug: str) -> None:
 
 def run_openrouter(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand."""
-    if args.or_command == "model":
+    cmd = args.or_command
+    if cmd in ("model", *MODEL_ALIASES):
         if not args.model_slug:
             ui_display.report_error(
                 "No model slug specified. Usage: llm-cli-py openrouter model <model-slug>"
             )
             sys.exit(1)
         show_model(args.model_slug)
-    elif args.or_command == "rankings":
+    elif cmd in ("rankings", *RANKINGS_ALIASES):
         _get_api_key()
         show_rankings()
-    elif args.or_command == "credits":
+    elif cmd in ("credits", *CREDITS_ALIASES):
         _get_api_key()
         show_credits()
     else:
@@ -394,18 +409,30 @@ def run_openrouter(args: argparse.Namespace) -> None:
 
 
 def add_subparser(subparsers: argparse._SubParsersAction[Any]) -> None:
-    """Add the 'openrouter' subcommand to the CLI parser."""
+    """Add the 'openrouter' subcommand (with aliases) to the CLI parser."""
     parser = subparsers.add_parser(
         "openrouter",
+        aliases=OPENROUTER_ALIASES,
         help="Show OpenRouter rankings, credits, and model details",
         description="Display OpenRouter model rankings, credit information, and model details.",
     )
     parser.add_argument(
         "or_command",
         nargs="?",
-        choices=["rankings", "credits", "model"],
-        help="Subcommand: 'rankings' (model rankings), 'credits' (credit info), "
-        "'model' (model details). Omit to show both rankings and credits.",
+        choices=[
+            "rankings",
+            *RANKINGS_ALIASES,
+            "credits",
+            *CREDITS_ALIASES,
+            "model",
+            *MODEL_ALIASES,
+        ],
+        help=(
+            "Subcommand: 'rankings' (model rankings), 'credits' (credit info), "
+            "'model' (model details). "
+            "Short aliases: r/rank, c/credit, m. "
+            "Omit to show both rankings and credits."
+        ),
     )
     parser.add_argument(
         "model_slug",

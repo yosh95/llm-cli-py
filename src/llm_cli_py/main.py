@@ -223,7 +223,7 @@ def main() -> None:
         run_models(api_url, api_key)
         return
 
-    if args.command == "openrouter":
+    if args.command in ("openrouter", "or", "opr", "ort"):
         run_openrouter(args)
         return
 

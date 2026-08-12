@@ -114,6 +114,44 @@ llm-cli-py --api-url https://api.example.com/v1 --api-key sk-your-key -m gpt-4o
 llm-cli-py --proxy-url http://proxy-server:8080
 ```
 
+### OpenRouter Subcommand
+
+The `openrouter` subcommand provides quick access to OpenRouter rankings, credits,
+and model details. Short aliases make it even faster to type:
+
+| Alias | Description |
+|---|---|
+| `or` | Short for `openrouter` |
+| `opr` | Another short alias |
+| `ort` | Another short alias |
+
+Sub-subcommands also have short forms:
+
+| Alias | Full | Description |
+|---|---|---|
+| `r`, `rank` | `rankings` | Model usage rankings |
+| `c`, `credit` | `credits` | Credit / spending info |
+| `m` | `model` | Model details (requires model slug) |
+
+```bash
+# Full command
+llm-cli-py openrouter rankings
+llm-cli-py openrouter credits
+llm-cli-py openrouter model openai/gpt-4o
+
+# Short aliases
+llm-cli-py or r           # rankings
+llm-cli-py or c           # credits
+llm-cli-py or m openai/gpt-4o   # model details
+
+# Or use alternative aliases
+llm-cli-py opr rank
+llm-cli-py ort credit
+
+# No subcommand → show both rankings and credits
+llm-cli-py or
+```
+
 ### Slash Commands (Interactive Mode)
 
 | Command | Description |
