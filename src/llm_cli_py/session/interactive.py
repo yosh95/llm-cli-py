@@ -11,7 +11,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .. import ui
-from ..consts import APPROVAL_MODE_VERIFIER, history_file_path
+from ..consts import APPROVAL_MODE_VERIFIER
 from ..models import DataSource
 from .input_backend import InputBackend, create_backend
 from .session import ActiveSession
@@ -193,12 +193,10 @@ def run_interactive(
         plain_input: When True, use a plain ``input()`` backend that never
             touches the terminal. Safe for automation / non-tty stdin.
     """
-    hist_path = history_file_path()
     completer = SlashCommandCompleter()
     bindings = _build_key_bindings()
 
     backend: InputBackend = create_backend(
-        hist_path,
         plain=plain_input,
         completer=completer,
         bindings=bindings,

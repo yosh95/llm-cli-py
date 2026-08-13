@@ -1,19 +1,4 @@
-"""Constants and path management for llm-cli-py."""
-
-from pathlib import Path
-
-_HISTORY_FILE = Path.home() / ".llm-cli-py-history"
-"""Prompt-toolkit input history file (a dotfile in the user's home dir)."""
-
-
-def history_file_path() -> Path:
-    """Return the path to the prompt_toolkit input-history file.
-
-    The only persisted state is the interactive prompt history, so it is
-    stored directly as a dotfile in the user's home directory.
-    """
-    return _HISTORY_FILE
-
+"""Constants for llm-cli-py."""
 
 # ── Timeout constants (seconds) ────────────────────────────────────
 

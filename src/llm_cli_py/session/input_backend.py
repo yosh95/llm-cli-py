@@ -20,11 +20,9 @@ Use :func:`create_backend` to pick one.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer
-from prompt_toolkit.history import FileHistory
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 
 
@@ -53,15 +51,12 @@ class PromptToolkitBackend(InputBackend):
 
     def __init__(
         self,
-        history_path: Path,
         completer: Completer | None = None,
         bindings: KeyBindings | None = None,
     ) -> None:
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        if not history_path.exists():
-            history_path.touch()
-
-        history = FileHistory(str(history_path))
+        # History is kept in memory only (no file persistence) so it is reset
+        # every time a new backend is created.
+        history = InMemoryHistory()
         self._session: PromptSession[str] = PromptSession(
             history=history,
             completer=completer,
@@ -82,7 +77,6 @@ class PromptToolkitBackend(InputBackend):
 
 
 def create_backend(
-    history_path: Path,
     plain: bool = False,
     completer: Completer | None = None,
     bindings: KeyBindings | None = None,
@@ -97,7 +91,6 @@ def create_backend(
     if plain:
         return PlainInputBackend()
     return PromptToolkitBackend(
-        history_path,
         completer=completer,
         bindings=bindings,
     )

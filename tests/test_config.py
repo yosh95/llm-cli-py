@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from llm_cli_py.consts import (
     ENV_API_KEY,
     ENV_API_URL,
     ENV_MODEL,
     ENV_PROXY_URL,
     ENV_VERIFIER_MODEL,
-    history_file_path,
 )
 
 
 class TestConsts:
     """Test constants and path functions."""
-
-    def test_history_file_path(self) -> None:
-
-        assert history_file_path() == Path.home() / ".llm-cli-py-history"
 
     def test_env_var_names(self) -> None:
         assert ENV_API_KEY == "LLM_CLI_API_KEY"
