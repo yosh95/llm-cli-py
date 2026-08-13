@@ -18,9 +18,6 @@ DEFAULT_MODEL_FETCH_TIMEOUT: int = 30
 DEFAULT_URL_FETCH_TIMEOUT: int = 30
 """Default timeout for fetching URL content from CLI arguments."""
 
-DEFAULT_PYTHON_EXEC_TIMEOUT: int = 30
-"""Default timeout for Python code execution in the subprocess."""
-
 
 # ── Other application-wide defaults ────────────────────────────────
 

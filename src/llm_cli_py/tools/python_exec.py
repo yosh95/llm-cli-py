@@ -6,7 +6,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..consts import DEFAULT_PYTHON_EXEC_TIMEOUT
 from .types import ExecResult, ToolError
 
 _SHELL_META = {">", "<", "|", "2>&1", "2>", "1>", ">>", "2>>", ";", "&", "`", "$("}
@@ -70,14 +69,13 @@ def _check_dangerous_subprocess(code: str) -> str | None:
 
 def execute_python(
     code: str,
-    execution_timeout_seconds: int | None = None,
 ) -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
+    Runs without a timeout; the user can interrupt with Ctrl+C.
+
     Args:
         code: The Python code to execute.
-        execution_timeout_seconds: Max execution time in seconds
-            (default: {DEFAULT_PYTHON_EXEC_TIMEOUT}).
 
     Returns:
         ExecResult on completion, ToolError on failure.
@@ -92,33 +90,15 @@ def execute_python(
         tmp.write(code)
 
     try:
-        exec_timeout = (
-            execution_timeout_seconds
-            if execution_timeout_seconds is not None
-            else DEFAULT_PYTHON_EXEC_TIMEOUT
-        )
         result = subprocess.run(
             [sys.executable, str(tmp_path)],
             capture_output=True,
             text=True,
-            timeout=exec_timeout,
         )
         return ExecResult(
             stdout=result.stdout,
             stderr=result.stderr,
             exit_code=result.returncode,
-        )
-    except subprocess.TimeoutExpired as e:
-        return ExecResult(
-            stdout=e.stdout if isinstance(e.stdout, str) else "",
-            stderr=(
-                f"Execution timed out after {exec_timeout} seconds "
-                f"(the TOOL-level wall-clock limit).\n"
-                f"The code needs more time. Re-run execute_python and pass "
-                f"`execution_timeout_seconds` with a larger value "
-                f"(e.g. execution_timeout_seconds=300) to extend this limit."
-            ),
-            exit_code=-1,
         )
     except Exception as e:
         return ExecResult(
@@ -139,16 +119,8 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
             "type": "string",
             "description": "The Python code to execute. Use 'print()' for output.",
         },
-        "execution_timeout_seconds": {
-            "type": "integer",
-            "description": (f"Max execution time in seconds (default: {DEFAULT_PYTHON_EXEC_TIMEOUT})."),
-        },
     },
     "required": ["code"],
 }
 
-PYTHON_TOOL_DESCRIPTION = (
-    "Execute Python code in a sandboxed subprocess and return stdout/stderr. "
-    "Long-running operations may exceed the execution time limit; "
-    "if interrupted, the returned error explains how to proceed."
-)
+PYTHON_TOOL_DESCRIPTION = "Execute Python code in a sandboxed subprocess and return stdout/stderr."
