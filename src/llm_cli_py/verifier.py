@@ -16,7 +16,6 @@ import requests
 
 from .consts import DEFAULT_VERIFIER_TIMEOUT
 from .models import ToolCall
-from .providers.llm_api import reasoning_disable_params, should_disable_reasoning
 from .utils.http import post_with_retries
 
 VERIFIER_SYSTEM_PROMPT = (
@@ -145,10 +144,6 @@ class Verifier:
             "messages": messages,
             "stream": stream,
         }
-        # Disable thinking/reasoning for the verifier too (provider-aware).
-        if should_disable_reasoning():
-            body.update(reasoning_disable_params(self._api_url))
-
         return post_with_retries(
             self._session,
             f"{self._api_url}/chat/completions",
