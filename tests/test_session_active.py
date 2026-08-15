@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm_cli_py.consts import MAX_TOOL_ITERATIONS
-from llm_cli_py.models import DataSource, LlmResponse, ToolCall
+from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
@@ -149,6 +149,50 @@ class TestProcessAndPrint:
 
         captured = capsys.readouterr()
         assert "not found" in captured.out
+
+    def test_broken_tool_call_exits_loop_with_error(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A truncated (unparseable) tool call is NOT executed: error shown and loop exits."""
+        broken = ToolCall(id="call_1", name="execute_python", arguments={"raw": '{"code": "pri'})
+        # Both turns feed a broken tool call, so no real network request is made.
+        # (Leaving the second turn un-mocked would trigger a live HTTP request
+        # against api.example.com and block for seconds.)
+        with patch.object(
+            session.client,
+            "send",
+            side_effect=[
+                LlmResponse(text=None, tool_calls=[broken], finish_reason="tool_calls"),
+                LlmResponse(text=None, tool_calls=[broken], finish_reason="tool_calls"),
+            ],
+        ) as mock_send:
+            session.process_and_print([DataSource(text="Run it")])
+
+            captured = capsys.readouterr()
+            assert "truncated" in captured.out
+            assert "NOT executed" in captured.out
+
+            # We exit the loop without a re-request and without running any tool.
+            assert mock_send.call_count == 1
+
+            # Pre-populate history with the same broken assistant tool call (as the
+            # real client's _record_assistant would) and confirm it is dropped so
+            # the next turn reuses a clean assistant message.
+            session.client.state.conversation.append(
+                Message(
+                    role=Role.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "execute_python", "arguments": '{"raw": "x"}'},
+                        }
+                    ],
+                )
+            )
+            session.process_and_print([DataSource(text="Run it again")])
+            assert session.client.state.conversation[-1].tool_calls is None
 
     def test_tool_execution_error(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         def failing_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001

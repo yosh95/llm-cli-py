@@ -121,6 +121,19 @@ class ActiveSession:
             if not response.tool_calls:
                 break
 
+            # A tool call whose arguments are truncated/corrupted (JSON did not
+            # parse) cannot be executed safely. Print what we already streamed,
+            # surface an explicit error, and leave the agent loop so the user
+            # gets back to the prompt. (Previous behaviour silently re-requested
+            # non-streaming, which desynced the screen from history.)
+            if self._has_broken_tool_call(response.tool_calls):
+                ui.display.report_error(
+                    "A tool call had truncated (unparseable) arguments, so it "
+                    "was NOT executed. Please try again."
+                )
+                self._drop_broken_tool_calls_from_history(response.tool_calls)
+                break
+
             self._handle_tool_calls(response.tool_calls)
             current_data = []
 
@@ -155,6 +168,28 @@ class ActiveSession:
             ui.display.stream_end()
         elif response.text:
             ui.display.print_assistant(response.text)
+
+    @staticmethod
+    def _has_broken_tool_call(tool_calls: list[ToolCall]) -> bool:
+        """Return True if any tool call has unparseable (truncated) arguments."""
+        return any(isinstance(tc.arguments, dict) and "raw" in tc.arguments for tc in tool_calls)
+
+    def _drop_broken_tool_calls_from_history(self, tool_calls: list[ToolCall]) -> None:
+        """Remove the just-recorded broken tool calls from conversation history.
+
+        Leaving truncated tool_calls on the last assistant message makes the next
+        request carry assistant tool_calls with no matching tool result, which
+        some OpenAI-compatible APIs reject with HTTP 400. Drop them so the user
+        can simply retry with a clean assistant message.
+        """
+        broken_ids = {tc.id for tc in tool_calls if isinstance(tc.arguments, dict) and "raw" in tc.arguments}
+        for msg in reversed(self.client.state.conversation):
+            if msg.role != Role.ASSISTANT or not msg.tool_calls:
+                continue
+            msg.tool_calls = [tc for tc in msg.tool_calls if tc.get("id") not in broken_ids]
+            if not msg.tool_calls:
+                msg.tool_calls = None
+            break
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls (with verification and optional user confirmation)."""

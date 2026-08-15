@@ -365,21 +365,6 @@ class LlmApiClient(LlmClient):
             )
         )
 
-    def _post_non_streaming(
-        self,
-        messages: list[dict[str, Any]],
-        tool_schemas: list[ToolSchema],
-    ) -> LlmResponse:
-        """Send a non-streaming request and parse the complete response."""
-        body = self._build_request(messages, tool_schemas, stream=False)
-        resp = post_with_retries(
-            self._session,
-            self._api_url + "/chat/completions",
-            body,
-            self._timeout,
-        )
-        return self._parse_response(resp.json())
-
     def send(
         self,
         data: list[DataSource],
@@ -401,9 +386,10 @@ class LlmApiClient(LlmClient):
 
         Returns:
             An :class:`LlmResponse`. In streaming mode, tool-call arguments are
-            buffered until complete; if a buffered tool-call does not parse as
-            JSON (broken chunks), the call is transparently re-requested in
-            non-streaming mode to obtain a well-formed tool call.
+            buffered until complete. If a streamed tool call does not parse as
+            JSON (broken chunks), a :class:`ToolCall` whose ``arguments`` is
+            ``{"raw": ...}`` is returned as-is; the caller is responsible for
+            surfacing the failure (no silent non-streaming fallback).
         """
         self._append_user_messages(data)
 
@@ -424,13 +410,12 @@ class LlmApiClient(LlmClient):
                 on_text=on_text,
                 on_reasoning=on_reasoning,
             )
-            # If any streamed tool call has broken/truncated JSON arguments,
-            # re-request that turn non-streaming to get a well-formed call.
-            # This is a fallback for LLMs that occasionally split chunks badly.
-            if result.tool_calls and any(
-                isinstance(tc.arguments, dict) and "raw" in tc.arguments for tc in result.tool_calls
-            ):
-                result = self._post_non_streaming(messages, tool_schemas)
+            # A streamed tool call whose JSON arguments were truncated mid-flight
+            # is returned as-is (a ToolCall with {"raw": ...}). We deliberately do
+            # NOT silently re-request non-streaming here: doing so replaced the
+            # already-displayed streamed text with a regenerated response, making
+            # the answer look cut off and desyncing the screen from conversation
+            # history. The caller decides how to surface a broken tool call.
         else:
             result = self._parse_response(resp.json())
 

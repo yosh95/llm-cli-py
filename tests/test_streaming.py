@@ -167,64 +167,6 @@ class TestSendStreaming:
         assert result.tool_calls[0].name == "python"
         assert result.tool_calls[0].arguments == {"code": "print(1)"}
 
-    def test_send_streaming_broken_tool_call_triggers_non_streaming_fallback(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        # Streaming returns a broken tool call (raw/truncated args)
-        broken_stream = _make_stream_response(
-            [
-                _chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "python", "arguments": '{"code": "pri'},
-                            }
-                        ]
-                    }
-                ),
-                _chunk({}, finish_reason="tool_calls"),
-                "data: [DONE]",
-            ]
-        )
-        broken_stream.status_code = 200
-
-        # Non-streaming fallback returns a well-formed tool call
-        ok_response = MagicMock()
-        ok_response.status_code = 200
-        ok_response.json.return_value = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "id": "call_1",
-                                "function": {
-                                    "name": "python",
-                                    "arguments": {"code": "print(1)"},
-                                },
-                            }
-                        ],
-                    },
-                    "finish_reason": "tool_calls",
-                }
-            ],
-        }
-
-        with patch(
-            "llm_cli_py.providers.llm_api.post_with_retries",
-            side_effect=[broken_stream, ok_response],
-        ) as mock_post:
-            result = client.send([DataSource(text="Run it")], [], stream=True)
-
-        assert mock_post.call_count == 2
-        # post_with_retries(session, url, json_body, timeout)
-        assert mock_post.call_args_list[0][0][2]["stream"] is True
-        assert mock_post.call_args_list[1][0][2]["stream"] is False
-        assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].arguments == {"code": "print(1)"}
-
     def test_reasoning_round_trip_in_build_messages(self) -> None:
         """DeepSeek V4 requires reasoning to be replayed with tool calls."""
         from llm_cli_py.models import Message, Role
@@ -257,3 +199,34 @@ class TestSendStreaming:
         messages = client._build_messages()
         assistant = messages[-1]
         assert "reasoning" not in assistant
+
+    def test_send_streaming_broken_tool_call_returned_without_fallback(self) -> None:
+        """Broken tool calls are returned as-is (no non-streaming fallback)."""
+        client = LlmApiClient("m", "https://api.example.com/v1", "k")
+        broken_stream = _make_stream_response(
+            [
+                _chunk(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "python", "arguments": '{"code": "pri'},
+                            }
+                        ]
+                    }
+                ),
+                _chunk({}, finish_reason="tool_calls"),
+                "data: [DONE]",
+            ]
+        )
+        broken_stream.status_code = 200
+
+        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=broken_stream) as mock_post:
+            result = client.send([DataSource(text="Run it")], [], stream=True)
+
+        # Exactly one request, and the broken call is surfaced for the caller.
+        assert mock_post.call_count == 1
+        assert mock_post.call_args_list[0][0][2]["stream"] is True
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].arguments == {"raw": '{"code": "pri'}
