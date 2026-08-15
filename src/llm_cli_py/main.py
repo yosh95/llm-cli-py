@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         "The proxy handles API key and model injection server-side.",
     )
     parser.add_argument(
+        "-am",
         "--approval-mode",
         choices=[APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO],
         default=APPROVAL_MODE_VERIFIER,
@@ -94,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "-vm",
         "--verifier-model",
         help=f"Model to use for the verifier. Overrides {ENV_VERIFIER_MODEL} env var. "
         "Defaults to the main LLM model if not specified.",
@@ -107,6 +109,17 @@ def build_parser() -> argparse.ArgumentParser:
         "Also enabled automatically when stdin is not a tty.",
     )
 
+    parser.add_argument(
+        "-l",
+        "--log-file",
+        help=(
+            "Write the LLM conversation history and tool-call log to PATH in the "
+            "same TOML format as /dump (reasoning excluded). The file is "
+            "overwritten after every turn and every React-loop iteration so "
+            "progress survives an abnormal exit. No file is written unless this "
+            "option is given."
+        ),
+    )
     # Subcommands
     subparsers = parser.add_subparsers(dest="command")
 
@@ -262,7 +275,7 @@ def main() -> None:
             backend=PlainInputBackend(),
             approval_mode=args.approval_mode,
         )
-        session = ActiveSession(client, ctx)
+        session = ActiveSession(client, ctx, log_file=args.log_file)
 
         initial_sources: list[DataSource] = []
         for src in args.sources:
