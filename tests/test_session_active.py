@@ -1,7 +1,7 @@
 """Tests for ActiveSession - the core session processing logic.
 
 Covers process_and_print, tool call handling, verifier integration,
-error handling, and MAX_TOOL_ITERATIONS enforcement.
+error handling.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_cli_py.consts import MAX_TOOL_ITERATIONS
 from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
@@ -443,89 +442,3 @@ class TestTokenUsage:
         assert prompt == 100
         assert completion == 50
         assert total == 150
-
-
-class TestMaxToolIterations:
-    """Test MAX_TOOL_ITERATIONS enforcement."""
-
-    def test_max_iterations_stops_loop(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """The tool-call loop should stop after max_tool_iterations iterations."""
-        # Every response returns a tool call that requires another iteration
-        tool_call = ToolCall(id="call_1", name="looper", arguments={})
-
-        def looper_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
-            return ExecResult(stdout="loop")
-
-        session.ctx.tool_registry.register(
-            "looper",
-            "Loop tool",
-            {"type": "object", "properties": {}, "required": []},
-            looper_tool,
-        )
-
-        max_iter = session.ctx.max_tool_iterations
-        # Generate enough responses to exceed max_tool_iterations
-        responses = [LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls")] * (
-            max_iter + 5
-        )
-
-        with patch.object(session.client, "send", side_effect=responses) as mock_send:
-            session.process_and_print([DataSource(text="Start loop")])
-            send_call_count = mock_send.call_count
-
-        captured = capsys.readouterr()
-        assert "maximum tool-call iterations" in captured.out.lower()
-        # Verify send was called at most max_iter + 1 times
-        # (the +1 accounts for the initial request before tool calls start)
-        assert send_call_count <= max_iter + 1
-
-    def test_max_iterations_default_value(self) -> None:
-        assert MAX_TOOL_ITERATIONS == 200
-
-    def test_max_iterations_custom_value(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Custom max_tool_iterations should be respected."""
-        from llm_cli_py.providers.llm_api import LlmApiClient
-        from llm_cli_py.session.session import ActiveSession, SessionContext
-        from llm_cli_py.tools.registry import ToolRegistry
-        from llm_cli_py.tools.types import ExecResult
-        from llm_cli_py.verifier import Verifier
-
-        client = LlmApiClient(
-            model="gpt-4o",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        verifier = Verifier()
-        verifier.set_enabled(False)
-        ctx = SessionContext(
-            tool_registry=ToolRegistry(),
-            verifier=verifier,
-            max_tool_iterations=3,
-        )
-        custom_session = ActiveSession(client, ctx)
-
-        tool_call = ToolCall(id="call_1", name="looper", arguments={})
-
-        def looper_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
-            return ExecResult(stdout="loop")
-
-        custom_session.ctx.tool_registry.register(
-            "looper",
-            "Loop tool",
-            {"type": "object", "properties": {}, "required": []},
-            looper_tool,
-        )
-
-        responses = [LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls")] * 10
-
-        with patch.object(custom_session.client, "send", side_effect=responses) as mock_send:
-            custom_session.process_and_print([DataSource(text="Start loop")])
-            send_call_count = mock_send.call_count
-
-        captured = capsys.readouterr()
-        assert "maximum tool-call iterations" in captured.out.lower()
-        # With max_tool_iterations=3, send should be called at most 4 times
-        # (initial request + 3 tool iterations)
-        assert send_call_count <= 4

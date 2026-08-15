@@ -21,10 +21,6 @@ DEFAULT_URL_FETCH_TIMEOUT: int = 30
 
 # ── Other application-wide defaults ────────────────────────────────
 
-MAX_TOOL_ITERATIONS: int = 200
-"""Maximum number of tool-call iterations per user request."""
-
-
 # ── Environment variable names ─────────────────────────────────────
 
 ENV_API_KEY = "LLM_CLI_API_KEY"

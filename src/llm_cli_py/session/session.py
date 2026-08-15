@@ -11,7 +11,6 @@ from ..consts import (
     APPROVAL_MODE_AUTO,
     APPROVAL_MODE_MANUAL,
     APPROVAL_MODE_VERIFIER,
-    MAX_TOOL_ITERATIONS,
 )
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
@@ -28,13 +27,11 @@ class SessionContext:
         self,
         tool_registry: ToolRegistry,
         verifier: Verifier | None = None,
-        max_tool_iterations: int = MAX_TOOL_ITERATIONS,
         backend: InputBackend | None = None,
         approval_mode: str = APPROVAL_MODE_VERIFIER,
     ) -> None:
         self.tool_registry = tool_registry
         self.verifier = verifier
-        self.max_tool_iterations = max_tool_iterations
         # Approval strategy for tool calls:
         #   "verifier" -> use the LLM-based verifier (default).
         #   "manual"   -> no verifier; prompt the human for every tool call (HITL).
@@ -86,17 +83,8 @@ class ActiveSession:
             return
 
         current_data = data
-        iteration = 0
 
         while True:
-            iteration += 1
-            if iteration > self.ctx.max_tool_iterations:
-                ui.display.report_error(
-                    f"Reached maximum tool-call iterations ({self.ctx.max_tool_iterations}). "
-                    "Stopping to prevent infinite loops."
-                )
-                break
-
             tool_schemas = self.ctx.tool_registry.get_schemas()
             model = self.client.state.model
             display_model = model if model else "LLM"

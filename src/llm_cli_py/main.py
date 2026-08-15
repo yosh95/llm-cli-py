@@ -27,7 +27,6 @@ from .consts import (
     ENV_MODEL,
     ENV_PROXY_URL,
     ENV_VERIFIER_MODEL,
-    MAX_TOOL_ITERATIONS,
 )
 from .models import DataSource
 from .providers.llm_api import LlmApiClient
@@ -98,12 +97,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--verifier-model",
         help=f"Model to use for the verifier. Overrides {ENV_VERIFIER_MODEL} env var. "
         "Defaults to the main LLM model if not specified.",
-    )
-    parser.add_argument(
-        "--max-tool-iterations",
-        type=int,
-        default=MAX_TOOL_ITERATIONS,
-        help="Maximum number of tool-call iterations per user request (default: %(default)s)",
     )
     parser.add_argument(
         "--plain-input",
@@ -266,7 +259,6 @@ def main() -> None:
         ctx = SessionContext(
             tool_registry=tool_registry,
             verifier=verifier,
-            max_tool_iterations=args.max_tool_iterations,
             backend=PlainInputBackend(),
             approval_mode=args.approval_mode,
         )
