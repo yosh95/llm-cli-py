@@ -202,6 +202,12 @@ def run_interactive(
         bindings=bindings,
     )
 
+    # Reuse the same backend for inline confirmations (verifier overrides,
+    # HITL approvals) so those prompts get the same editor launch, Ctrl+Z
+    # suspend, and in-memory history as the main prompt. In plain-input mode
+    # this is a PlainInputBackend, which stays safe for automation / non-tty.
+    session.ctx.backend = backend
+
     print("Type /h for help, /q to quit.")
 
     if initial_sources:
