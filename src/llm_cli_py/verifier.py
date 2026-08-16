@@ -27,7 +27,13 @@ VERIFIER_SYSTEM_PROMPT = (
     "2. A proposed tool call (function name and arguments)\n\n"
     "Respond with a JSON object containing:\n"
     '- "approved": true or false\n'
-    '- "reason": A short explanation of your decision\n\n'
+    '- "reason": A short explanation of your decision.\n\n'
+    "The reason must be provided for BOTH approved and rejected calls. "
+    "It should describe:\n"
+    "1. What the tool is about to do (the action being executed)\n"
+    "2. The basis for your approved/rejected judgment (the safety reasoning)\n\n"
+    "Include both parts even when approved, since the result may be reviewed "
+    "by a human for manual confirmation, especially on rejection.\n\n"
     "Approve ONLY if ALL of the following are true:\n"
     "- The operation does NOT modify files, data, or system state\n"
     "- The operation does NOT read or write sensitive/personal information\n"

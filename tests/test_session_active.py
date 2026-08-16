@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from llm_cli_py.consts import APPROVAL_MODE_VERIFIER
 from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
@@ -285,6 +286,72 @@ class TestVerifierIntegration:
         assert "Verifier approved 'safe_tool'." in captured.out
         # Since the verifier approved the call, the tool must be executed.
         assert "Executing tool: safe_tool" in captured.out
+
+    def test_verifier_context_has_only_purpose_and_tool_call(self, session: ActiveSession) -> None:
+        """The verifier receives only the tool's purpose + execution content,
+        not the full past history."""
+        verifier = MagicMock(spec=Verifier)
+        verifier.enabled = True
+        verifier.is_configured = True
+        verifier.verify.return_value = (True, "Safe operation")
+        session.ctx.verifier = verifier
+        session.ctx.approval_mode = APPROVAL_MODE_VERIFIER
+
+        # Pre-populate older history that the verifier must ignore.
+        session.client.state.conversation.append(
+            Message(role=Role.USER, content="Earlier unrelated question")
+        )
+        session.client.state.conversation.append(
+            Message(role=Role.ASSISTANT, content="Earlier answer about something")
+        )
+        # The current assistant message proposing the tool call: content is the
+        # tool's purpose, tool_calls holds the execution content.
+        session.client.state.conversation.append(
+            Message(
+                role=Role.ASSISTANT,
+                content="I will look up the weather.",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "safe_tool",
+                            "arguments": '{"query": "current weather"}',
+                        },
+                    }
+                ],
+            )
+        )
+
+        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
+            return ExecResult(stdout="done")
+
+        session.ctx.tool_registry.register(
+            "safe_tool",
+            "Safe",
+            {"type": "object", "properties": {}, "required": []},
+            safe_tool,
+        )
+
+        tool_call = ToolCall(
+            id="call_1",
+            name="safe_tool",
+            arguments={"query": "current weather"},
+        )
+        session._handle_tool_calls([tool_call])
+
+        # Verifier got exactly the tool purpose + the tool call content.
+        assert verifier.verify.called
+        ctx = verifier.verify.call_args.args[1]
+        assert len(ctx) == 2
+        # 1st: the assistant's purpose explanation.
+        assert ctx[0] == {"role": "assistant", "content": "I will look up the weather."}
+        # 2nd: the tool execution content (name + arguments).
+        assert "safe_tool" in ctx[1]["content"]
+        assert "current weather" in ctx[1]["content"]
+        # Older history is NOT included.
+        assert not any("Earlier question" in m["content"] for m in ctx)
+        assert not any("Earlier answer" in m["content"] for m in ctx)
 
     def test_verifier_rejects_tool_user_overrides(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]

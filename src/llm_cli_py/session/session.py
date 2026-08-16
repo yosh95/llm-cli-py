@@ -251,10 +251,30 @@ class ActiveSession:
                     ui.display.print_rule()
                     print(f"\U0001f50d {verifier_model} checking...")
 
-                    ctx_messages = [
-                        {"role": m.role.value, "content": m.content}
-                        for m in self.client.state.conversation[-5:]
-                    ]
+                    # Only pass the most relevant context to the verifier:
+                    #  1. the assistant's explanation of why it wants to run the
+                    #     tool (the tool's purpose), and
+                    #  2. the tool call content (function name + arguments).
+                    # Earlier history is intentionally omitted to keep the
+                    # verifier focused on the current call and its rationale.
+                    ctx_messages: list[dict[str, str]] = []
+                    for m in reversed(self.client.state.conversation):
+                        if m.role != Role.ASSISTANT or not m.tool_calls:
+                            continue
+                        ctx_messages.append({"role": "assistant", "content": m.content or ""})
+                        # Reconstruct the tool call data (OpenAI format:
+                        #   name/arguments live under "function").
+                        calls = []
+                        for call in m.tool_calls:
+                            func = call.get("function", {})
+                            calls.append(f"{func.get('name', 'unknown')}({func.get('arguments', '')})")
+                        ctx_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": "Tool to execute: " + "; ".join(calls),
+                            }
+                        )
+                        break
 
                     # Stream the verifier's response live, mirroring how the main
                     # LLM turn is displayed.
@@ -323,7 +343,12 @@ class ActiveSession:
             try:
                 result = tool.func(**tc.arguments)
                 result_str = ui.display.format_tool_result(result)
-                ui.display.print_tool_result(result_str)
+                # Do NOT print web search results to the terminal screen. They
+                # are passed on to the LLM (via the conversation history below)
+                # but kept out of the human-visible output to avoid cluttering
+                # the display with raw search results.
+                if not isinstance(result, SearchResult):
+                    ui.display.print_tool_result(result_str)
 
                 if isinstance(result, ToolError):
                     content_str = result.error
