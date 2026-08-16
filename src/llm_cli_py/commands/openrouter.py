@@ -120,8 +120,8 @@ def show_rankings() -> None:
             -int(x.get("total_tokens", 0)),
         ),
     )
-    # Show top 15
-    top_items = items[:15]
+    # Show top 10
+    top_items = items[:10]
     print(f"  [{latest_date}] (top {len(top_items)})")
     for i, item in enumerate(top_items, 1):
         slug = item.get("model_permaslug", "?")
