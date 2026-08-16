@@ -16,7 +16,7 @@ from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
-from llm_cli_py.tools.types import ExecResult, ToolError
+from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem, ToolError
 from llm_cli_py.verifier import Verifier
 
 
@@ -133,6 +133,46 @@ class TestProcessAndPrint:
         captured = capsys.readouterr()
         assert "The answer is 42" in captured.out
         assert "Tool: calculate" in captured.out
+
+    def test_web_search_result_shown_truncated(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Web search results are shown in the terminal, but truncated to a
+        single top result."""
+        def search_tool(query: str = "") -> SearchResult:  # noqa: ARG001
+            return SearchResult(
+                query=query,
+                results=[
+                    SearchResultItem(title="Top hit", url="https://a.com", snippet="Snippet A"),
+                    SearchResultItem(title="Second hit", url="https://b.com", snippet="Snippet B"),
+                ],
+                result_count=2,
+            )
+
+        session.ctx.tool_registry.register(
+            "web_search",
+            "Search the web",
+            {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+            search_tool,
+        )
+
+        tool_call = ToolCall(id="call_1", name="web_search", arguments={"query": "python"})
+        responses = [
+            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
+            LlmResponse(text="Done"),
+        ]
+
+        with patch.object(session.client, "send", side_effect=responses):
+            session.process_and_print([DataSource(text="Search python")])
+
+        captured = capsys.readouterr()
+        # Tool call (arguments) is shown.
+        assert "Tool: web_search" in captured.out
+        assert "query: python" in captured.out
+        # Truncated result is shown: top result only.
+        assert "Tool Result:" in captured.out
+        assert "Top hit" in captured.out
+        assert "Second hit" not in captured.out
 
     def test_tool_not_found(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         tool_call = ToolCall(id="call_1", name="nonexistent_tool", arguments={})

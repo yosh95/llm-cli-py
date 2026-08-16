@@ -109,16 +109,27 @@ def format_tool_result(result: ToolResult) -> str:
         return "\n".join(lines)
 
     if isinstance(result, SearchResult):
+        # Web search results can be very long, so only the top result is shown
+        # on the human-visible terminal (the full results are still passed to
+        # the LLM via conversation history). The snippet is also truncated to
+        # a fixed number of characters to avoid cluttering the display.
+        display_top = 1
+        snippet_max_chars = 300
+
         lines = []
         lines.append(f"- Query: {result.query}")
         lines.append("")
-        lines.append(f"- Results ({result.result_count}):")
+        shown = min(display_top, result.result_count)
+        lines.append(f"- Results ({result.result_count}, showing top {shown}):")
         lines.append("")
-        for i, item in enumerate(result.results, 1):
+        for i, item in enumerate(result.results[: display_top], 1):
             lines.append(f"  - {i}. {item.title}")
             lines.append(f"    URL: {item.url}")
             if item.snippet:
-                lines.append(f"    Snippet: {_sanitize_terminal_output(item.snippet)}")
+                snippet = _sanitize_terminal_output(item.snippet)
+                if len(snippet) > snippet_max_chars:
+                    snippet = snippet[: snippet_max_chars] + "..."
+                lines.append(f"    Snippet: {snippet}")
             lines.append("")
         return "\n".join(lines).rstrip("\n")
 

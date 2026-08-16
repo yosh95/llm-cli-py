@@ -357,6 +357,13 @@ class TestProviderThinkingOffPayload:
         assert supported is True
         assert fields == {"reasoning_effort": "none"}
 
+    def test_ollama_cloud(self) -> None:
+        from llm_cli_py.providers.llm_api import provider_thinking_off_payload
+
+        fields, supported = provider_thinking_off_payload("https://ollama.com/v1")
+        assert supported is True
+        assert fields == {"reasoning_effort": "none"}
+
     def test_openai(self) -> None:
         from llm_cli_py.providers.llm_api import provider_thinking_off_payload
 

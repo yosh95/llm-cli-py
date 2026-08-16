@@ -123,15 +123,26 @@ class TestFormatToolResultEdgeCases:
         assert "Snippet:" not in output
 
     def test_format_search_result_multiple_results(self) -> None:
+        # Only the top result is shown to avoid cluttering the display.
         items = [
             SearchResultItem(title="First", url="https://first.com", snippet="First snippet"),
             SearchResultItem(title="Second", url="https://second.com", snippet="Second snippet"),
         ]
         result = SearchResult(query="multi", results=items, result_count=2)
         output = format_tool_result(result)
-        assert "Results (2):" in output
+        assert "Results (2, showing top 1):" in output
         assert "1. First" in output
-        assert "2. Second" in output
+        assert "2. Second" not in output
+
+    def test_format_search_result_truncates_long_snippet(self) -> None:
+        # A very long snippet should be truncated to keep the display compact.
+        long_snippet = "x" * 500
+        items = [SearchResultItem(title="Long", url="https://long.com", snippet=long_snippet)]
+        result = SearchResult(query="long", results=items, result_count=1)
+        output = format_tool_result(result)
+        # The snippet is truncated (300 chars) and marked with "..." at the end
+        # of the snippet text.
+        assert "x" * 300 + "..." in output
 
     def test_format_unknown_type(self) -> None:
         output = format_tool_result({"custom": "data"})

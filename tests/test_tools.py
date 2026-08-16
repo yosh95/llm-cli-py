@@ -741,14 +741,14 @@ class TestFormatToolResult:
         assert "Python" in output
         assert "https://python.org" in output
         assert "Python is great" in output
-        assert "Results (1):" in output
+        assert "Results (1, showing top 1):" in output
 
     def test_format_search_result_no_results(self) -> None:
         """Test formatting a SearchResult with no results."""
         result = SearchResult(query="empty search", results=[], result_count=0)
         output = format_tool_result(result)
         assert "Query: empty search" in output
-        assert "Results (0):" in output
+        assert "Results (0, showing top 0):" in output
 
     def test_format_tool_error(self) -> None:
         """Test formatting a ToolError."""

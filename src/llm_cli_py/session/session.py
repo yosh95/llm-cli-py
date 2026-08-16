@@ -343,12 +343,11 @@ class ActiveSession:
             try:
                 result = tool.func(**tc.arguments)
                 result_str = ui.display.format_tool_result(result)
-                # Do NOT print web search results to the terminal screen. They
-                # are passed on to the LLM (via the conversation history below)
-                # but kept out of the human-visible output to avoid cluttering
-                # the display with raw search results.
-                if not isinstance(result, SearchResult):
-                    ui.display.print_tool_result(result_str)
+                # Print tool results to the terminal. Web search results are
+                # shortened by format_tool_result (top result + truncated
+                # snippet) to avoid cluttering the display, while the full
+                # results are still passed to the LLM via conversation history.
+                ui.display.print_tool_result(result_str)
 
                 if isinstance(result, ToolError):
                     content_str = result.error

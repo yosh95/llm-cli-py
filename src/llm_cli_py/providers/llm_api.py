@@ -36,7 +36,13 @@ def _detect_provider(api_url: str) -> str:
         return "openrouter"
     if "api.openai.com" in url:
         return "openai"
-    if "localhost" in url or "127.0.0.1" in url or "::1" in url or "11434" in url:
+    if (
+        "localhost" in url
+        or "127.0.0.1" in url
+        or "::1" in url
+        or "11434" in url
+        or "ollama.com" in url
+    ):
         return "ollama"
     return "generic"
 
