@@ -30,7 +30,6 @@ from .consts import (
 )
 from .models import DataSource
 from .providers.llm_api import LlmApiClient
-from .session.input_backend import PlainInputBackend
 from .session.interactive import run_interactive
 from .session.session import ActiveSession, SessionContext
 from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
@@ -99,14 +98,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--verifier-model",
         help=f"Model to use for the verifier. Overrides {ENV_VERIFIER_MODEL} env var. "
         "Defaults to the main LLM model if not specified.",
-    )
-    parser.add_argument(
-        "--plain-input",
-        action="store_true",
-        help="Use plain input() instead of prompt_toolkit. "
-        "Avoids terminal manipulation (raw mode, alternate screen) that can "
-        "conflict with automation harnesses and non-tty stdin. "
-        "Also enabled automatically when stdin is not a tty.",
     )
     parser.add_argument(
         "--enable-thinking",
@@ -299,18 +290,9 @@ def main() -> None:
         ) as client,
         verifier,
     ):
-        # Use plain input when requested or when stdin is not a tty
-        # (automation harnesses / piped input). prompt_toolkit manipulates the
-        # terminal directly and can leave it in a broken state when driven by
-        # an external harness, so fall back to plain input() in that case.
-        plain_input = args.plain_input or not sys.stdin.isatty()
-        if plain_input:
-            ui_display.report_info("Using plain input() (prompt_toolkit disabled).")
-
         ctx = SessionContext(
             tool_registry=tool_registry,
             verifier=verifier,
-            backend=PlainInputBackend(),
             approval_mode=args.approval_mode,
         )
         session = ActiveSession(client, ctx, log_file=args.log_file)
@@ -337,7 +319,6 @@ def main() -> None:
         run_interactive(
             session,
             initial_sources if initial_sources else None,
-            plain_input=plain_input,
         )
 
 

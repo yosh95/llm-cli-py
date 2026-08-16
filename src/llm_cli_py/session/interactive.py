@@ -1,72 +1,20 @@
-"""Interactive chat session using prompt_toolkit."""
+"""Interactive chat session using the shared prompt_toolkit session."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 
 import tomli_w
-from prompt_toolkit.completion import CompleteEvent, Completer, Completion
-from prompt_toolkit.document import Document
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from .. import ui
 from ..consts import APPROVAL_MODE_VERIFIER
 from ..models import DataSource
-from .input_backend import InputBackend, create_backend
+from .prompt import prompt
 from .session import ActiveSession
-
-
-class SlashCommandCompleter(Completer):
-    """Completer for slash commands."""
-
-    def __init__(self) -> None:
-        self._commands = {
-            "/help": "Show this help message",
-            "/quit": "Exit the session",
-            "/clear": "Clear conversation history",
-            "/info": "Show session information",
-            "/dump": "Dump conversation history as TOML to stdout",
-            "/verifier": "Toggle verifier on/off (only affects --approval-mode verifier)",
-        }
-
-    def get_completions(
-        self,
-        document: Document,
-        _complete_event: CompleteEvent,
-    ) -> Iterable[Completion]:
-        text = document.text_before_cursor
-
-        if not text.startswith("/"):
-            return
-
-        if " " not in text:
-            for cmd, desc in self._commands.items():
-                if cmd.startswith(text):
-                    yield Completion(
-                        cmd,
-                        start_position=-len(text),
-                        display=f"{cmd}  ({desc})",
-                    )
-            return
 
 
 def _get_prompt_text() -> str:
     return "> "
-
-
-def _build_key_bindings() -> KeyBindings:
-    kb = KeyBindings()
-
-    @kb.add("enter")
-    def _(event: KeyPressEvent) -> None:
-        event.current_buffer.validate_and_handle()
-
-    @kb.add("c-j")
-    def _(event: KeyPressEvent) -> None:
-        event.current_buffer.insert_text("\n")
-
-    return kb
 
 
 # ── Command handlers ──────────────────────────────────────────────
@@ -183,31 +131,13 @@ _SLASH_COMMANDS: dict[str, Callable[[ActiveSession, str], str | None]] = {
 def run_interactive(
     session: ActiveSession,
     initial_sources: list[DataSource] | None = None,
-    plain_input: bool = False,
 ) -> None:
     """Run the interactive chat session loop.
 
     Args:
         session: The active session to drive.
         initial_sources: Optional initial inputs to process before prompting.
-        plain_input: When True, use a plain ``input()`` backend that never
-            touches the terminal. Safe for automation / non-tty stdin.
     """
-    completer = SlashCommandCompleter()
-    bindings = _build_key_bindings()
-
-    backend: InputBackend = create_backend(
-        plain=plain_input,
-        completer=completer,
-        bindings=bindings,
-    )
-
-    # Reuse the same backend for inline confirmations (verifier overrides,
-    # HITL approvals) so those prompts get the same editor launch, Ctrl+Z
-    # suspend, and in-memory history as the main prompt. In plain-input mode
-    # this is a PlainInputBackend, which stays safe for automation / non-tty.
-    session.ctx.backend = backend
-
     print("Type /h for help, /q to quit.")
 
     if initial_sources:
@@ -217,7 +147,7 @@ def run_interactive(
         try:
             ui.display.print_rule()
             prompt_text = _get_prompt_text()
-            user_input = backend.prompt(prompt_text)
+            user_input = prompt(prompt_text)
 
             if not user_input.strip():
                 continue

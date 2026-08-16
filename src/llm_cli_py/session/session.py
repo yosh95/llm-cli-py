@@ -19,7 +19,7 @@ from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchem
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
 from ..verifier import Verifier
-from .input_backend import InputBackend, PlainInputBackend
+from .prompt import prompt
 from .stream_state import StreamState
 
 
@@ -30,7 +30,6 @@ class SessionContext:
         self,
         tool_registry: ToolRegistry,
         verifier: Verifier | None = None,
-        backend: InputBackend | None = None,
         approval_mode: str = APPROVAL_MODE_VERIFIER,
     ) -> None:
         self.tool_registry = tool_registry
@@ -42,10 +41,6 @@ class SessionContext:
         if approval_mode not in (APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO):
             approval_mode = APPROVAL_MODE_VERIFIER
         self.approval_mode = approval_mode
-        # Backend used for interactive confirmations (e.g. verifier override).
-        # Defaults to a plain input() so that automation / non-tty runs never
-        # trigger prompt_toolkit's terminal manipulation unexpectedly.
-        self.backend = backend if backend is not None else PlainInputBackend()
 
 
 class ActiveSession:
@@ -231,9 +226,7 @@ class ActiveSession:
             if self.ctx.approval_mode == APPROVAL_MODE_MANUAL:
                 # No verifier: ask the human to approve every tool call (HITL).
                 ui.display.print_rule()
-                raw_input_text = self.ctx.backend.prompt(
-                    f"\U0001f91a Approve tool call '{tc.name}'? [Y/n] "
-                ).strip()
+                raw_input_text = prompt(f"\U0001f91a Approve tool call '{tc.name}'? [Y/n] ").strip()
                 user_confirmation = raw_input_text.lower()
                 if user_confirmation in ("", "y", "yes"):
                     ui.display.report_info("User approved tool call (HITL).")
@@ -284,8 +277,8 @@ class ActiveSession:
 
                     ui.display.print_rule()
                     if not approved:
-                        ui.display.report_warning(f"\U0001f91a Verifier rejected '{tc.name}'.")
-                        raw_input_text = self.ctx.backend.prompt("Execute anyway? [Y/n or feedback] ").strip()
+                        ui.display.report_warning(f"Verifier rejected '{tc.name}'.")
+                        raw_input_text = prompt("Execute anyway? [Y/n or feedback] ").strip()
                         user_confirmation = raw_input_text.lower()
                         if user_confirmation in ("", "y", "yes"):
                             ui.display.report_info("User override: executing tool call.")

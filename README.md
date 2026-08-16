@@ -76,10 +76,6 @@ llm-cli-py -m gpt-4o -s README.md "Summarize this file"
 # Interactive mode
 llm-cli-py -m gpt-4o
 
-# Interactive mode with plain input() (no prompt_toolkit terminal handling)
-# Useful when driven by an automation harness / non-tty stdin.
-llm-cli-py -m gpt-4o --plain-input
-
 # List available models
 llm-cli-py models
 
@@ -139,19 +135,13 @@ llm-cli-py or
 | `/dump` | Dump conversation as TOML |
 | `/verifier`, `/v` | Toggle verifier on/off |
 
-## Interactive Input Backends
+## Interactive Input
 
-The interactive session normally uses `prompt_toolkit`, which provides history,
-completion, and multiline editing. `prompt_toolkit` manipulates the terminal
-directly (raw mode, alternate screen buffer, its own event loop). When an
-external automation harness (e.g. HTB) drives the same tty, these can conflict
-and leave the terminal in a broken state (no echo, unresponsive keyboard).
-
-To avoid this:
-
-- `--plain-input` — use plain `input()` instead of `prompt_toolkit`.
-- **Auto-fallback** — if stdin is not a tty (piped / automated), the CLI
-  automatically switches to plain `input()` regardless of the flag.
+The interactive session uses `prompt_toolkit`, which provides history,
+completion, and multiline editing. The `PromptSession` is created exactly once
+and shared across the main chat loop and HITL confirmation prompts, so
+prompt_toolkit's terminal handling (raw mode, alternate screen buffer, its own
+event loop) is initialized only once and never conflicts with itself.
 
 ## Streaming
 
