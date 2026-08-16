@@ -284,9 +284,8 @@ class ActiveSession:
 
                     ui.display.print_rule()
                     if not approved:
-                        raw_input_text = self.ctx.backend.prompt(
-                            f"\U0001f91a Verifier rejected '{tc.name}'. Execute anyway? [Y/n or feedback] "
-                        ).strip()
+                        ui.display.report_warning(f"\U0001f91a Verifier rejected '{tc.name}'.")
+                        raw_input_text = self.ctx.backend.prompt("Execute anyway? [Y/n or feedback] ").strip()
                         user_confirmation = raw_input_text.lower()
                         if user_confirmation in ("", "y", "yes"):
                             ui.display.report_info("User override: executing tool call.")

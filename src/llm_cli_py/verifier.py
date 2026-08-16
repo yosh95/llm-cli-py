@@ -16,6 +16,7 @@ import requests
 
 from .consts import DEFAULT_VERIFIER_TIMEOUT
 from .models import ToolCall
+from .providers.llm_api import provider_thinking_off_payload
 from .utils.http import post_with_retries
 
 VERIFIER_SYSTEM_PROMPT = (
@@ -90,11 +91,15 @@ class Verifier:
         api_key: str = "",
         model: str = "",
         timeout: int = DEFAULT_VERIFIER_TIMEOUT,
+        thinking: bool = True,
     ) -> None:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        # Mirror the main client's thinking mode so the verifier also skips
+        # slow reasoning traces when thinking is off (the default).
+        self._thinking = thinking
         self._enabled = True
         self._session = requests.Session()
         # No keep-alive reuse (see LlmApiClient): one sequential request per turn,
@@ -144,6 +149,9 @@ class Verifier:
             "messages": messages,
             "stream": stream,
         }
+        if not self._thinking:
+            fields, _ = provider_thinking_off_payload(self._api_url)
+            body.update(fields)
         return post_with_retries(
             self._session,
             f"{self._api_url}/chat/completions",

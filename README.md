@@ -62,6 +62,7 @@ llm-cli-py
 | `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
+| `LLM_CLI_ENABLE_THINKING` | Set to `1`/`true` to enable the model's thinking/reasoning mode (same as `--enable-thinking`). |
 
 ## Usage
 
@@ -181,6 +182,32 @@ client live, so streaming works end-to-end over the LAN proxy as well.
 If you need to disable streaming (e.g. to inspect raw non-streamed responses),
 you can lower the request timeout or adjust the client; by default streaming
 is always on.
+
+### Thinking mode (default: off; `--enable-thinking` to enable)
+
+Thinking is **off by default**: the CLI asks the provider to skip the
+reasoning phase and answer immediately, which cuts latency and saves output
+tokens on models that otherwise think for a long time before their first
+answer token. Pass `--enable-thinking` to keep the model's reasoning phase.
+
+```bash
+llm-cli-py -m qwen3.5:9b                                  # thinking off (default)
+llm-cli-py --enable-thinking -m 'anthropic/claude-sonnet-5.0'  # via OpenRouter
+```
+
+Because each OpenAI-compatible endpoint expresses "thinking off" differently,
+the CLI picks the right request field automatically from the API URL:
+
+| Endpoint   | Sent field                          | Effect |
+|------------|-------------------------------------|--------|
+| OpenRouter | `reasoning: {"effort": "none"}`     | Disables thinking (OpenRouter normalises across upstreams) |
+| Ollama     | `reasoning_effort: "none"`          | Maps to `think: false` on modern Ollama; ignored on older versions |
+| OpenAI     | `reasoning_effort: "low"`           | Reduces but cannot fully disable o-series thinking |
+| unknown    | *(none)*                            | Thinking may still occur — the CLI warns |
+
+The same `thinking` option is applied to the main LLM request and the verifier
+request. For unknown/custom endpoints a warning is shown because no
+provider-specific field is known.
 
 ## Tools
 

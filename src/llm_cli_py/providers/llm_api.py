@@ -25,6 +25,47 @@ def _get_default_system_prompt() -> str:
     )
 
 
+def _detect_provider(api_url: str) -> str:
+    """Classify an API base URL into a known provider family.
+
+    Used to decide how to express "thinking off" on an OpenAI-compatible
+    ``/chat/completions`` endpoint, since providers disagree on the field.
+    """
+    url = (api_url or "").lower()
+    if "openrouter.ai" in url:
+        return "openrouter"
+    if "api.openai.com" in url:
+        return "openai"
+    if "localhost" in url or "127.0.0.1" in url or "::1" in url or "11434" in url:
+        return "ollama"
+    return "generic"
+
+
+def provider_thinking_off_payload(api_url: str) -> tuple[dict[str, Any], bool]:
+    """Return ``(extra_request_fields, supported)`` to request "thinking off".
+
+    - OpenRouter normalises thinking across upstreams via its unified
+      ``reasoning: {"effort": "none"}`` — fully disables thinking there.
+    - Modern Ollama maps ``reasoning_effort: "none"`` on its OpenAI-compatible
+      endpoint to ``think: false`` (it does *not* accept ``think`` on
+      ``/v1/chat/completions`` nor the ``minimal`` level). Older Ollama simply
+      ignores the field, which is harmless.
+    - OpenAI itself cannot fully disable o-series reasoning; ``low`` merely
+      reduces it. Anything else would 400.
+    - Unknown/generic endpoints get no field so we never corrupt the request;
+      ``supported=False`` lets the caller warn the user.
+    """
+    provider = _detect_provider(api_url)
+    if provider == "openrouter":
+        return {"reasoning": {"effort": "none"}}, True
+    if provider == "ollama":
+        return {"reasoning_effort": "none"}, True
+    if provider == "openai":
+        # Reduces but does not fully disable thinking on reasoning models.
+        return {"reasoning_effort": "low"}, True
+    return {}, False
+
+
 def _get_system_prompt() -> str:
     """Return the system prompt for every request.
 
@@ -46,11 +87,17 @@ class LlmApiClient(LlmClient):
         api_url: str,
         api_key: str | None = None,
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        thinking: bool = True,
     ) -> None:
         super().__init__(model)
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
+        # Whether the model is allowed to emit reasoning/thinking tokens.
+        # When False, a provider-appropriate "thinking off" parameter is added
+        # to every request so slow thinking traces (and their extra tokens) are
+        # skipped where the provider supports it.
+        self._thinking = thinking
         self._session = requests.Session()
         # Do not reuse keep-alive connections. This CLI makes one sequential chat
         # request per turn (no parallel assets), so keep-alive saves nothing while
@@ -143,6 +190,10 @@ class LlmApiClient(LlmClient):
                     }
                 )
             body["tools"] = tools
+
+        if not self._thinking:
+            fields, _ = provider_thinking_off_payload(self._api_url)
+            body.update(fields)
 
         return body
 

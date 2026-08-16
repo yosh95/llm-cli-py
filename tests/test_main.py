@@ -159,3 +159,13 @@ class TestCliParser:
         parser = build_parser()
         args = parser.parse_args(["or", "credit"])
         assert args.or_command == "credit"
+
+    def test_enable_thinking_flag(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--enable-thinking"])
+        assert args.enable_thinking is True
+
+    def test_thinking_default_off(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.enable_thinking is False
