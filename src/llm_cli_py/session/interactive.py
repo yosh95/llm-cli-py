@@ -25,7 +25,7 @@ def _cmd_help(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
         ("/help, /h", "Show this help message"),
         ("/quit, /q", "Exit the session"),
         ("/clear, /c", "Clear conversation history"),
-        ("/info, /i", "Show session info (API URL, model, verifier, tools, token usage)"),
+        ("/info, /i", "Show session info (API URL, model, verifier, tools)"),
         ("/dump", "Dump conversation history as TOML to stdout"),
         ("/verifier [on|off], /v", "Toggle verifier (only when --approval-mode verifier)"),
     ]
@@ -61,10 +61,6 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     tools = session.ctx.tool_registry.get_tool_names()
     ui.display.print_info("Available Tools", ", ".join(tools) if tools else "None")
     ui.display.print_info("Messages", str(len(state.conversation)))
-    prompt_tok, completion_tok, total_tok = session.token_usage
-    ui.display.print_info(
-        "Tokens (prompt/completion/total)", f"{prompt_tok} / {completion_tok} / {total_tok}"
-    )
     return None
 
 

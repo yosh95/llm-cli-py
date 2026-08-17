@@ -17,6 +17,7 @@ def _chunk(delta: dict[str, object], finish_reason: str | None = None) -> str:
 def _make_stream_response(chunks: list[str]) -> MagicMock:
     """Build a mock requests.Response that yields SSE data lines."""
     resp = MagicMock()
+    resp.status_code = 200
     resp.iter_lines.return_value = [c.encode("utf-8") for c in chunks]
     return resp
 
@@ -113,7 +114,7 @@ class TestSendStreaming:
         stream_resp.status_code = 200
 
         with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp) as mock_post:
-            result = client.send([DataSource(text="Hello")], [], stream=True)
+            result = client.send([DataSource(text="Hello")], [])
 
         # post_with_retries(session, url, json_body, timeout)
         json_body = mock_post.call_args[0][2]
@@ -143,7 +144,7 @@ class TestSendStreaming:
         stream_resp.status_code = 200
 
         with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp):
-            result = client.send([DataSource(text="Run it")], [], stream=True)
+            result = client.send([DataSource(text="Run it")], [])
 
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "python"
@@ -172,7 +173,7 @@ class TestSendStreaming:
         broken_stream.status_code = 200
 
         with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=broken_stream) as mock_post:
-            result = client.send([DataSource(text="Run it")], [], stream=True)
+            result = client.send([DataSource(text="Run it")], [])
 
         # Exactly one request, and the broken call is surfaced for the caller.
         assert mock_post.call_count == 1

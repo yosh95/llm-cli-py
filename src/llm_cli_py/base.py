@@ -23,15 +23,13 @@ class LlmClient(ABC):
         self,
         data: list[DataSource],
         tool_schemas: list[ToolSchema],
-        stream: bool = False,
         on_text: Callable[[str], None] | None = None,
     ) -> LlmResponse:
-        """Send a chat completion request.
+        """Send a chat completion request (streaming).
 
         Args:
             data: User input sources for this turn.
             tool_schemas: Tool schemas to advertise.
-            stream: When True, stream tokens via ``on_text``.
             on_text: Optional callback invoked with each text delta.
         """
         ...

@@ -63,18 +63,8 @@ class ToolSchema:
 
 
 @dataclass
-class TokenUsage:
-    """Token usage tracking."""
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-@dataclass
 class ClientState:
     """State of an LLM client session."""
 
     model: str = ""
     conversation: list[Message] = field(default_factory=list)
-    token_usage: TokenUsage = field(default_factory=TokenUsage)

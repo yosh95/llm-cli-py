@@ -61,12 +61,6 @@ class ActiveSession:
         # iteration so that progress survives an abnormal exit.
         self._log_file = Path(log_file).expanduser() if log_file else None
 
-    @property
-    def token_usage(self) -> tuple[int, int, int]:
-        """Return (prompt_tokens, completion_tokens, total_tokens)."""
-        usage = self.client.state.token_usage
-        return usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-
     def process_and_print(self, data: list[DataSource]) -> None:
         """Main processing loop: send to LLM, handle tool calls, display results."""
         if not self.client.state.model:
@@ -117,8 +111,7 @@ class ActiveSession:
             # A tool call whose arguments are truncated/corrupted (JSON did not
             # parse) cannot be executed safely. Print what we already streamed,
             # surface an explicit error, and leave the agent loop so the user
-            # gets back to the prompt. (Previous behaviour silently re-requested
-            # non-streaming, which desynced the screen from history.)
+            # gets back to the prompt.
             if self._has_broken_tool_call(response.tool_calls):
                 ui.display.report_error(
                     "A tool call had truncated (unparseable) arguments, so it "
@@ -149,15 +142,13 @@ class ActiveSession:
         return self.client.send(
             data,
             tool_schemas,
-            stream=True,
             on_text=on_text,
         )
 
     def _finalize_streamed(self, state: StreamState, response: LlmResponse) -> None:
-        """Close open streaming blocks and show any missed (non-streamed) output.
+        """Close open streaming blocks and show any missed output.
 
-        A provider may return a non-streaming fallback (e.g. re-requested tool
-        calls) or an error body that produced no deltas; display it once here.
+        If a provider produced no deltas, display the accumulated response once here.
         """
         if state.answer_open:
             ui.display.stream_end()

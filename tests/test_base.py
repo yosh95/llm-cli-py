@@ -20,11 +20,10 @@ class _ConcreteClient(LlmClient):
         self,
         _data: list[DataSource],
         _tool_schemas: list[ToolSchema],
-        stream: bool = False,
         on_text: Callable[[str], None] | None = None,
     ) -> LlmResponse:
         # Parameters exist to satisfy the abstract base signature.
-        _ = (stream, on_text)
+        _ = on_text
         return LlmResponse(text="mocked")
 
 

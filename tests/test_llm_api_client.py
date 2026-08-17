@@ -1,10 +1,12 @@
 """Tests for the OpenAI-compatible chat API client.
 
-Covers request building, response parsing, retry behaviour, and context manager.
+Covers request building, streaming response parsing, retry behaviour,
+and context manager.
 """
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +14,19 @@ import requests
 
 from llm_cli_py.models import DataSource, Message, Role, ToolSchema
 from llm_cli_py.providers.llm_api import LlmApiClient
+
+
+def _chunk(delta: dict[str, object], finish_reason: str | None = None) -> str:
+    """Build a single SSE data line from a delta dict."""
+    return json.dumps({"choices": [{"delta": delta, "finish_reason": finish_reason}]})
+
+
+def _make_stream_response(chunks: list[str]) -> MagicMock:
+    """Build a mock requests.Response that yields SSE data lines."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.iter_lines.return_value = [c.encode("utf-8") for c in chunks]
+    return resp
 
 
 class TestLlmApiClient:
@@ -57,86 +72,8 @@ class TestLlmApiClient:
 
         assert body["model"] == "gpt-4o"
         assert body["messages"] == [{"role": "user", "content": "hi"}]
-        assert body["stream"] is False
+        assert body["stream"] is True
         assert body["tools"][0]["function"]["name"] == "python"
-
-    def test_parse_text_response(self) -> None:
-        client = LlmApiClient(
-            model="gpt-4o",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        result = client._parse_response(
-            {
-                "choices": [
-                    {
-                        "message": {"content": "Hi!"},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-            }
-        )
-
-        assert result.text == "Hi!"
-        assert result.tool_calls == []
-        assert result.finish_reason == "stop"
-        assert client._state.token_usage.total_tokens == 15
-
-    def test_parse_tool_call_response(self) -> None:
-        client = LlmApiClient(
-            model="gpt-4o",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        result = client._parse_response(
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "function": {
-                                        "name": "python",
-                                        "arguments": {"code": "print(1)"},
-                                    },
-                                }
-                            ],
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            }
-        )
-
-        assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].name == "python"
-        assert result.tool_calls[0].arguments == {"code": "print(1)"}
-
-    def test_parse_tool_call_response_missing_id_is_synthesized(self) -> None:
-        client = LlmApiClient(
-            model="gpt-4o",
-            api_url="https://api.example.com/v1",
-            api_key="key",
-        )
-        result = client._parse_response(
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "",
-                            "tool_calls": [
-                                {"function": {"name": "python", "arguments": {"code": "print(1)"}}}
-                            ],
-                        },
-                    }
-                ],
-            }
-        )
-
-        assert result.tool_calls[0].id == "call_0"
 
     def test_send_appends_user_message(self) -> None:
         client = LlmApiClient(
@@ -144,13 +81,15 @@ class TestLlmApiClient:
             api_url="https://api.example.com/v1",
             api_key="key",
         )
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Answer"}, "finish_reason": "stop"}],
-        }
+        stream_resp = _make_stream_response(
+            [
+                _chunk({"content": "Answer"}),
+                _chunk({}, finish_reason="stop"),
+                "data: [DONE]",
+            ]
+        )
 
-        with patch("llm_cli_py.utils.http.requests.Session.post", return_value=mock_resp) as mock_post:
+        with patch("llm_cli_py.utils.http.requests.Session.post", return_value=stream_resp) as mock_post:
             result = client.send([DataSource(text="Question")], [])
 
         assert result.text == "Answer"
@@ -161,7 +100,7 @@ class TestLlmApiClient:
         mock_post.assert_called_once()
         _args, kwargs = mock_post.call_args
         assert kwargs["json"]["model"] == "gpt-4o"
-        assert kwargs["json"]["stream"] is False
+        assert kwargs["json"]["stream"] is True
         assert _args[0] == "https://api.example.com/v1/chat/completions"
 
     def test_send_retries_on_rate_limit(self) -> None:
@@ -172,17 +111,20 @@ class TestLlmApiClient:
         )
         mock_fail = MagicMock()
         mock_fail.status_code = 429
-        mock_fail.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 429")
+        mock_fail.text = "rate limit exceeded"
 
-        mock_ok = MagicMock()
-        mock_ok.status_code = 200
-        mock_ok.json.return_value = {
-            "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
-        }
+        stream_resp = _make_stream_response(
+            [
+                _chunk({"content": "OK"}),
+                _chunk({}, finish_reason="stop"),
+                "data: [DONE]",
+            ]
+        )
 
         with (
             patch(
-                "llm_cli_py.utils.http.requests.Session.post", side_effect=[mock_fail, mock_ok]
+                "llm_cli_py.utils.http.requests.Session.post",
+                side_effect=[mock_fail, stream_resp],
             ) as mock_post,
             patch("llm_cli_py.utils.http.time.sleep") as mock_sleep,
         ):
@@ -217,26 +159,25 @@ class TestLlmApiClient:
             api_url="https://api.example.com/v1",
             api_key="key",
         )
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "",
+        stream_resp = _make_stream_response(
+            [
+                _chunk(
+                    {
                         "tool_calls": [
                             {
+                                "index": 0,
                                 "id": "call_1",
-                                "function": {"name": "python", "arguments": {"code": "print(1)"}},
+                                "function": {"name": "python", "arguments": '{"code": "print(1)"}'},
                             }
-                        ],
-                    },
-                    "finish_reason": "tool_calls",
-                }
-            ],
-        }
+                        ]
+                    }
+                ),
+                _chunk({}, finish_reason="tool_calls"),
+                "data: [DONE]",
+            ]
+        )
 
-        with patch("llm_cli_py.utils.http.requests.Session.post", return_value=mock_resp):
+        with patch("llm_cli_py.utils.http.requests.Session.post", return_value=stream_resp):
             client.send([DataSource(text="run it")], [])
 
         appended = client._state.conversation[-1]

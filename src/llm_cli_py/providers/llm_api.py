@@ -108,19 +108,17 @@ class LlmApiClient(LlmClient):
         self,
         messages: list[dict[str, Any]],
         tool_schemas: list[ToolSchema],
-        stream: bool = False,
     ) -> dict[str, Any]:
         """Build the request body for the API call.
 
         Args:
             messages: The message array to send.
             tool_schemas: Tool schemas to advertise to the model.
-            stream: When True, request a Server-Sent Events (SSE) token stream.
         """
         body: dict[str, Any] = {
             "model": self._state.model,
             "messages": messages,
-            "stream": stream,
+            "stream": True,
         }
 
         if tool_schemas:
@@ -139,50 +137,6 @@ class LlmApiClient(LlmClient):
             body["tools"] = tools
 
         return body
-
-    def _parse_response(self, response_data: dict[str, Any]) -> LlmResponse:
-        """Parse an OpenAI-compatible ``/chat/completions`` response into an LlmResponse."""
-        choices = response_data.get("choices") or []
-        if not choices:
-            return LlmResponse()
-
-        choice = choices[0]
-        message = choice.get("message") or {}
-        finish_reason = choice.get("finish_reason")
-
-        text = message.get("content") or None
-        tool_calls_raw = message.get("tool_calls") or []
-
-        tool_calls = []
-        for i, tc in enumerate(tool_calls_raw):
-            func = tc.get("function", {})
-            args = func.get("arguments", {})
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except json.JSONDecodeError:
-                    args = {"raw": args}
-            tool_calls.append(
-                ToolCall(
-                    id=tc.get("id") or f"call_{i}",
-                    name=func.get("name", ""),
-                    arguments=args,
-                )
-            )
-
-        usage = response_data.get("usage") or {}
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        if prompt_tokens or completion_tokens:
-            self._state.token_usage.prompt_tokens += prompt_tokens
-            self._state.token_usage.completion_tokens += completion_tokens
-            self._state.token_usage.total_tokens += prompt_tokens + completion_tokens
-
-        return LlmResponse(
-            text=text,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-        )
 
     def _parse_stream_chunk(self, chunk: dict[str, Any]) -> dict[str, Any]:
         """Parse a single streaming ``choices[0].delta`` chunk.
@@ -280,7 +234,7 @@ class LlmApiClient(LlmClient):
                 arguments: Any = json.loads(args_raw) if args_raw else {}
             except json.JSONDecodeError:
                 # Malformed / truncated chunk. Keep the raw string so the
-                # caller can fall back (e.g. re-request non-streaming).
+                # caller can surface the failure.
                 arguments = {"raw": args_raw}
             tool_calls.append(
                 ToolCall(
@@ -344,52 +298,40 @@ class LlmApiClient(LlmClient):
         self,
         data: list[DataSource],
         tool_schemas: list[ToolSchema],
-        stream: bool = False,
         on_text: Callable[[str], None] | None = None,
     ) -> LlmResponse:
-        """Send a chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
+        """Send a streaming chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
 
         Args:
             data: User input sources for this turn.
             tool_schemas: Tool schemas to advertise (always sent, since this CLI
                 enables ``web_search`` and ``execute_python`` by default).
-            stream: When True, consume the SSE token stream and surface text
-                deltas live via ``on_text``.
             on_text: Optional callback invoked with each text delta (streaming).
 
         Returns:
-            An :class:`LlmResponse`. In streaming mode, tool-call arguments are
-            buffered until complete. If a streamed tool call does not parse as
-            JSON (broken chunks), a :class:`ToolCall` whose ``arguments`` is
-            ``{"raw": ...}`` is returned as-is; the caller is responsible for
-            surfacing the failure (no silent non-streaming fallback).
+            An :class:`LlmResponse`. Tool-call arguments are buffered until
+            complete. If a streamed tool call does not parse as JSON (broken
+            chunks), a :class:`ToolCall` whose ``arguments`` is ``{"raw": ...}``
+            is returned as-is; the caller is responsible for surfacing the
+            failure (no silent non-streaming fallback).
         """
         self._append_user_messages(data)
 
         messages = self._build_messages()
-        body = self._build_request(messages, tool_schemas, stream=stream)
+        body = self._build_request(messages, tool_schemas)
 
         resp = post_with_retries(
             self._session,
             self._api_url + "/chat/completions",
             body,
             self._timeout,
-            stream=stream,
+            stream=True,
         )
 
-        if stream:
-            result = self._parse_stream_response(
-                resp,
-                on_text=on_text,
-            )
-            # A streamed tool call whose JSON arguments were truncated mid-flight
-            # is returned as-is (a ToolCall with {"raw": ...}). We deliberately do
-            # NOT silently re-request non-streaming here: doing so replaced the
-            # already-displayed streamed text with a regenerated response, making
-            # the answer look cut off and desyncing the screen from conversation
-            # history. The caller decides how to surface a broken tool call.
-        else:
-            result = self._parse_response(resp.json())
+        result = self._parse_stream_response(
+            resp,
+            on_text=on_text,
+        )
 
         self._record_assistant(result)
         return result

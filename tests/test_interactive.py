@@ -58,18 +58,6 @@ class TestSlashCommands:
         assert "API URL" in captured.out
         assert "https://api.example.com/v1" in captured.out
 
-    def test_info_command_shows_token_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
-        session = _make_session()
-        session.client.state.token_usage.prompt_tokens = 200
-        session.client.state.token_usage.completion_tokens = 100
-        session.client.state.token_usage.total_tokens = 300
-        _handle_slash_command(session, "/info")
-        captured = capsys.readouterr()
-        assert "200" in captured.out
-        assert "100" in captured.out
-        assert "300" in captured.out
-        assert "Tokens" in captured.out
-
     def test_unknown_command(self, capsys: pytest.CaptureFixture[str]) -> None:
         session = _make_session()
         _handle_slash_command(session, "/notacommand")

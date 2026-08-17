@@ -144,25 +144,21 @@ event loop) is initialized only once and never conflicts with itself.
 
 ## Streaming
 
-The CLI requests responses in streaming mode (`stream: true`). Answer tokens
-are rendered live as they arrive.
+The CLI always requests responses in streaming mode (`stream: true`). Answer
+tokens are rendered live as they arrive.
 
 - **Answer** tokens stream under an `Assistant:` heading.
 - **Tool calls** are buffered across chunks and only executed once their
   arguments are complete. If a provider emits a broken/truncated tool-call
-  argument chunk, that turn is transparently re-requested in non-streaming
-  mode so a well-formed call is obtained.
-- The **verifier** model is also streamed: its JSON verdict streams under
+  argument chunk, the call is surfaced with an explicit error and the turn
+  exits (no silent non-streaming re-request).
+- The **Verifier** model is also streamed: its JSON verdict streams under
   a `Verifier:` heading before the approve/reject verdict is printed. If the
-  verifier stream yields no content, it transparently falls back to a
-  non-streaming request so verification always completes.
+  verifier stream yields no content, it falls back to a non-streaming request
+  so verification always completes.
 
 When routing through `llm_proxy.py`, the proxy relays the SSE stream to the
 client live, so streaming works end-to-end over the LAN proxy as well.
-
-If you need to disable streaming (e.g. to inspect raw non-streamed responses),
-you can lower the request timeout or adjust the client; by default streaming
-is always on.
 
 ## Tools
 

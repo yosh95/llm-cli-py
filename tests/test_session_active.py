@@ -508,22 +508,3 @@ class TestVerifierIntegration:
         assert "skipped" in captured.out.lower()
         # Check that user feedback was added to conversation
         assert any("User feedback" in m.content for m in session.client.state.conversation)
-
-
-class TestTokenUsage:
-    """Test token_usage property."""
-
-    def test_token_usage_default(self, session: ActiveSession) -> None:
-        prompt, completion, total = session.token_usage
-        assert prompt == 0
-        assert completion == 0
-        assert total == 0
-
-    def test_token_usage_after_parse(self, session: ActiveSession) -> None:
-        session.client.state.token_usage.prompt_tokens = 100
-        session.client.state.token_usage.completion_tokens = 50
-        session.client.state.token_usage.total_tokens = 150
-        prompt, completion, total = session.token_usage
-        assert prompt == 100
-        assert completion == 50
-        assert total == 150

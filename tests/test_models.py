@@ -6,7 +6,6 @@ from llm_cli_py.models import (
     LlmResponse,
     Message,
     Role,
-    TokenUsage,
     ToolCall,
     ToolSchema,
 )
@@ -99,22 +98,6 @@ class TestToolCall:
         assert tc.id == "call_1"
         assert tc.name == "web_search"
         assert tc.arguments["explanation"] == "Need to search for Python info"
-
-
-class TestTokenUsage:
-    """Test TokenUsage dataclass."""
-
-    def test_default_usage(self) -> None:
-        usage = TokenUsage()
-        assert usage.prompt_tokens == 0
-        assert usage.completion_tokens == 0
-        assert usage.total_tokens == 0
-
-    def test_custom_usage(self) -> None:
-        usage = TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
-        assert usage.prompt_tokens == 100
-        assert usage.completion_tokens == 50
-        assert usage.total_tokens == 150
 
 
 class TestClientState:
