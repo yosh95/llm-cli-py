@@ -139,6 +139,7 @@ class TestProcessAndPrint:
     ) -> None:
         """Web search results are shown in the terminal, but truncated to a
         single top result."""
+
         def search_tool(query: str = "") -> SearchResult:  # noqa: ARG001
             return SearchResult(
                 query=query,

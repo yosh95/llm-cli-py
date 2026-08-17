@@ -122,13 +122,13 @@ def format_tool_result(result: ToolResult) -> str:
         shown = min(display_top, result.result_count)
         lines.append(f"- Results ({result.result_count}, showing top {shown}):")
         lines.append("")
-        for i, item in enumerate(result.results[: display_top], 1):
+        for i, item in enumerate(result.results[:display_top], 1):
             lines.append(f"  - {i}. {item.title}")
             lines.append(f"    URL: {item.url}")
             if item.snippet:
                 snippet = _sanitize_terminal_output(item.snippet)
                 if len(snippet) > snippet_max_chars:
-                    snippet = snippet[: snippet_max_chars] + "..."
+                    snippet = snippet[:snippet_max_chars] + "..."
                 lines.append(f"    Snippet: {snippet}")
             lines.append("")
         return "\n".join(lines).rstrip("\n")
