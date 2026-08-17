@@ -25,47 +25,6 @@ def _get_default_system_prompt() -> str:
     )
 
 
-def _detect_provider(api_url: str) -> str:
-    """Classify an API base URL into a known provider family.
-
-    Used to decide how to express "thinking off" on an OpenAI-compatible
-    ``/chat/completions`` endpoint, since providers disagree on the field.
-    """
-    url = (api_url or "").lower()
-    if "openrouter.ai" in url:
-        return "openrouter"
-    if "api.openai.com" in url:
-        return "openai"
-    if "localhost" in url or "127.0.0.1" in url or "::1" in url or "11434" in url or "ollama.com" in url:
-        return "ollama"
-    return "generic"
-
-
-def provider_thinking_off_payload(api_url: str) -> tuple[dict[str, Any], bool]:
-    """Return ``(extra_request_fields, supported)`` to request "thinking off".
-
-    - OpenRouter normalises thinking across upstreams via its unified
-      ``reasoning: {"effort": "none"}`` — fully disables thinking there.
-    - Modern Ollama maps ``reasoning_effort: "none"`` on its OpenAI-compatible
-      endpoint to ``think: false`` (it does *not* accept ``think`` on
-      ``/v1/chat/completions`` nor the ``minimal`` level). Older Ollama simply
-      ignores the field, which is harmless.
-    - OpenAI itself cannot fully disable o-series reasoning; ``low`` merely
-      reduces it. Anything else would 400.
-    - Unknown/generic endpoints get no field so we never corrupt the request;
-      ``supported=False`` lets the caller warn the user.
-    """
-    provider = _detect_provider(api_url)
-    if provider == "openrouter":
-        return {"reasoning": {"effort": "none"}}, True
-    if provider == "ollama":
-        return {"reasoning_effort": "none"}, True
-    if provider == "openai":
-        # Reduces but does not fully disable thinking on reasoning models.
-        return {"reasoning_effort": "low"}, True
-    return {}, False
-
-
 def _get_system_prompt() -> str:
     """Return the system prompt for every request.
 
@@ -87,17 +46,11 @@ class LlmApiClient(LlmClient):
         api_url: str,
         api_key: str | None = None,
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
-        thinking: bool = True,
     ) -> None:
         super().__init__(model)
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
-        # Whether the model is allowed to emit reasoning/thinking tokens.
-        # When False, a provider-appropriate "thinking off" parameter is added
-        # to every request so slow thinking traces (and their extra tokens) are
-        # skipped where the provider supports it.
-        self._thinking = thinking
         self._session = requests.Session()
         # Do not reuse keep-alive connections. This CLI makes one sequential chat
         # request per turn (no parallel assets), so keep-alive saves nothing while
@@ -144,12 +97,6 @@ class LlmApiClient(LlmClient):
             elif msg.role == Role.ASSISTANT and msg.tool_calls:
                 entry["content"] = msg.content or None
                 entry["tool_calls"] = msg.tool_calls
-                # DeepSeek V4 requires the assistant reasoning trace to be
-                # round-tripped alongside a tool call, or the next request
-                # fails with HTTP 400. Include it under the provider-agnostic
-                # "reasoning" key so both DeepSeek/Ollama and OpenRouter work.
-                if msg.reasoning:
-                    entry["reasoning"] = msg.reasoning
             else:
                 entry["content"] = msg.content
 
@@ -191,10 +138,6 @@ class LlmApiClient(LlmClient):
                 )
             body["tools"] = tools
 
-        if not self._thinking:
-            fields, _ = provider_thinking_off_payload(self._api_url)
-            body.update(fields)
-
         return body
 
     def _parse_response(self, response_data: dict[str, Any]) -> LlmResponse:
@@ -208,7 +151,6 @@ class LlmApiClient(LlmClient):
         finish_reason = choice.get("finish_reason")
 
         text = message.get("content") or None
-        reasoning = message.get("reasoning") or None
         tool_calls_raw = message.get("tool_calls") or []
 
         tool_calls = []
@@ -240,16 +182,13 @@ class LlmApiClient(LlmClient):
             text=text,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
-            reasoning=reasoning,
         )
 
     def _parse_stream_chunk(self, chunk: dict[str, Any]) -> dict[str, Any]:
         """Parse a single streaming ``choices[0].delta`` chunk.
 
-        Returns a dict with the delta fields (``content``, ``reasoning``,
-        ``tool_calls``) plus ``finish_reason``. Both ``reasoning_content``
-        (DeepSeek/Ollama) and ``reasoning`` (OpenRouter) delta field names are
-        recognised, and accumulated by the caller.
+        Returns a dict with the delta fields (``content``, ``tool_calls``)
+        plus ``finish_reason``.
         """
         choices = chunk.get("choices") or []
         if not choices:
@@ -260,10 +199,6 @@ class LlmApiClient(LlmClient):
         content = delta.get("content")
         if content:
             parsed["content"] = content
-        # Reasoning trace: providers disagree on the field name.
-        reasoning = delta.get("reasoning") or delta.get("reasoning_content")
-        if reasoning:
-            parsed["reasoning"] = reasoning
         tc = delta.get("tool_calls")
         if tc:
             parsed["tool_calls"] = tc
@@ -274,12 +209,10 @@ class LlmApiClient(LlmClient):
         self,
         response: requests.Response,
         on_text: Callable[[str], None] | None = None,
-        on_reasoning: Callable[[str], None] | None = None,
     ) -> LlmResponse:
         """Consume an SSE stream from ``requests.Response``.
 
         - Text deltas are printed via ``on_text`` as they arrive (live).
-        - Reasoning deltas are printed via ``on_reasoning`` as they arrive.
         - Tool-call arguments are buffered per ``index`` and only executed
           after the whole call is complete. If a buffered ``arguments`` string
           does not parse as JSON (broken/malformed chunk), a ``ToolCall`` with
@@ -287,7 +220,6 @@ class LlmApiClient(LlmClient):
 
         Returns an :class:`LlmResponse` with the fully accumulated result.
         """
-        reasoning_parts: list[str] = []
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
@@ -324,12 +256,6 @@ class LlmApiClient(LlmClient):
                 text_parts.append(content)
                 if on_text:
                     on_text(content)
-
-            reasoning = delta.get("reasoning")
-            if reasoning:
-                reasoning_parts.append(reasoning)
-                if on_reasoning:
-                    on_reasoning(reasoning)
 
             for tc in delta.get("tool_calls") or []:
                 index = tc.get("index", 0)
@@ -368,7 +294,6 @@ class LlmApiClient(LlmClient):
             text="".join(text_parts) or None,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
-            reasoning="\n".join(reasoning_parts) or None,
         )
         return result
 
@@ -412,7 +337,6 @@ class LlmApiClient(LlmClient):
                 role=Role.ASSISTANT,
                 content=result.text or "",
                 tool_calls=tool_calls_data,
-                reasoning=result.reasoning,
             )
         )
 
@@ -422,7 +346,6 @@ class LlmApiClient(LlmClient):
         tool_schemas: list[ToolSchema],
         stream: bool = False,
         on_text: Callable[[str], None] | None = None,
-        on_reasoning: Callable[[str], None] | None = None,
     ) -> LlmResponse:
         """Send a chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
 
@@ -430,10 +353,9 @@ class LlmApiClient(LlmClient):
             data: User input sources for this turn.
             tool_schemas: Tool schemas to advertise (always sent, since this CLI
                 enables ``web_search`` and ``execute_python`` by default).
-            stream: When True, consume the SSE token stream and surface text /
-                reasoning deltas live via ``on_text`` / ``on_reasoning``.
+            stream: When True, consume the SSE token stream and surface text
+                deltas live via ``on_text``.
             on_text: Optional callback invoked with each text delta (streaming).
-            on_reasoning: Optional callback invoked with each reasoning delta.
 
         Returns:
             An :class:`LlmResponse`. In streaming mode, tool-call arguments are
@@ -459,7 +381,6 @@ class LlmApiClient(LlmClient):
             result = self._parse_stream_response(
                 resp,
                 on_text=on_text,
-                on_reasoning=on_reasoning,
             )
             # A streamed tool call whose JSON arguments were truncated mid-flight
             # is returned as-is (a ToolCall with {"raw": ...}). We deliberately do

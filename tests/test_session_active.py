@@ -87,23 +87,6 @@ class TestProcessAndPrint:
         captured = capsys.readouterr()
         assert "Hello back!" in captured.out
 
-    def test_response_with_reasoning_not_displayed(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        # Reasoning is parsed/kept in the model for multi-turn history, but it
-        # is intentionally NOT printed to the terminal. Only the final answer
-        # should appear.
-        with patch.object(
-            session.client,
-            "send",
-            return_value=LlmResponse(text="Final answer", reasoning="I think..."),
-        ):
-            session.process_and_print([DataSource(text="Hi")])
-        captured = capsys.readouterr()
-        assert "Final answer" in captured.out
-        assert "I think..." not in captured.out
-        assert "Reasoning" not in captured.out
-
     def test_tool_call_then_text_response(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -460,11 +443,8 @@ class TestVerifierIntegration:
         def fake_verify(
             _tc: object,
             _ctx: object,
-            on_reasoning: Callable[[str], None] | None = None,
             on_content: Callable[[str], None] | None = None,
         ) -> tuple[bool, str]:
-            if on_reasoning:
-                on_reasoning("Thinking about it...")
             if on_content:
                 on_content('{"approved": true, "reason": "safe"}')
             return (True, "safe")
@@ -495,9 +475,6 @@ class TestVerifierIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        # Reasoning is no longer streamed/displayed by the session.
-        assert "Verifier reasoning:" not in captured.out
-        assert "Thinking about it..." not in captured.out
         assert "Verifier:" in captured.out
         # The content streaming callback was wired through to verify().
         kwargs = verifier.verify.call_args.kwargs

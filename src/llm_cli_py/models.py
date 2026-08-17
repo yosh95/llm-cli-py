@@ -25,8 +25,6 @@ class Message:
     name: str | None = None
     tool_calls: list[dict[str, object]] | None = None
     """Tool calls data (for assistant messages)."""
-    reasoning: str | None = None
-    """Reasoning / thinking trace attached to an assistant message."""
 
 
 @dataclass
@@ -44,9 +42,6 @@ class LlmResponse:
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
-    reasoning: str | None = None
-    """Model's internal reasoning / thinking trace (e.g. OpenRouter
-    ``reasoning`` field). Distinct from the final ``text`` answer."""
 
 
 @dataclass

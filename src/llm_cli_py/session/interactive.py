@@ -74,7 +74,6 @@ def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
             {
                 "role": m.role.value,
                 "content": m.content,
-                **({"reasoning": m.reasoning} if m.reasoning else {}),
             }
             for m in session.client.state.conversation
         ]

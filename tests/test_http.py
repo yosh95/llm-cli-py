@@ -102,16 +102,13 @@ class TestPostWithRetries:
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.reason = "Bad Request"
-        mock_resp.text = (
-            '{"error": {"message": '
-            '"The reasoning_content in the thinking mode must be passed back to the API.", "code": 20015}}'
-        )
+        mock_resp.text = '{"error": {"message": "Invalid request parameters.", "code": 20015}}'
         session.post.return_value = mock_resp
 
         with pytest.raises(requests.exceptions.HTTPError) as excinfo:
             post_with_retries(session, "https://example.com/api", {"q": 1}, 30, max_retries=3)
 
-        assert "reasoning_content in the thinking mode" in str(excinfo.value)
+        assert "Invalid request parameters" in str(excinfo.value)
         assert "(code: 20015)" in str(excinfo.value)
 
     def test_all_retries_exhausted_raises_last_exception(self) -> None:

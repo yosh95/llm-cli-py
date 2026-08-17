@@ -299,10 +299,6 @@ class TestVerifier:
         stream_resp = MagicMock()
         stream_resp.status_code = 200
         stream_resp.iter_lines.return_value = [
-            # Reasoning deltas are received from the provider but, with reasoning
-            # display removed, they are ignored by the verifier.
-            chunk({"reasoning_content": "Checking "}).encode(),
-            chunk({"reasoning_content": "safety"}).encode(),
             chunk({"content": '{"approved": true, "reason": "read only"}'}).encode(),
             b"data: [DONE]",
         ]
@@ -392,40 +388,3 @@ class TestExtractJsonObject:
     def test_empty(self) -> None:
         assert _extract_json_object("") is None
         assert _extract_json_object("   ") is None
-
-    def test_no_thinking_ollama_injects_reasoning_effort(self) -> None:
-        verifier = Verifier(
-            api_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="gpt-4o-mini",
-            thinking=False,
-        )
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"approved": true, "reason": "ok"}'}}],
-        }
-        with patch("llm_cli_py.utils.http.requests.Session.post", return_value=mock_resp) as mock_post:
-            verifier.verify(ToolCall(id="c", name="python", arguments={"code": "print(1)"}), [])
-        _args, kwargs = mock_post.call_args
-        assert kwargs["json"]["reasoning_effort"] == "none"
-
-    def test_thinking_on_omits_field(self) -> None:
-        verifier = Verifier(
-            api_url="http://localhost:11434/v1",
-            api_key="test-key",
-            model="gpt-4o-mini",
-            thinking=True,
-        )
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": '{"approved": true, "reason": "ok"}'}}],
-        }
-        with patch(
-            "llm_ci_py.utils.http.requests.Session.post".replace("llm_ci_py", "llm_cli_py"),
-            return_value=mock_resp,
-        ) as mock_post:
-            verifier.verify(ToolCall(id="c", name="python", arguments={"code": "print(1)"}), [])
-        _args, kwargs = mock_post.call_args
-        assert "reasoning_effort" not in kwargs["json"]

@@ -12,8 +12,7 @@ def _error_detail_from_response(resp: requests.Response, max_len: int = 800) -> 
     """Extract a human-readable error detail from an HTTP response body.
 
     Many providers (OpenRouter, DeepSeek, Ollama) return a JSON error body
-    whose ``error.message`` field contains the actual diagnostic (e.g. "The
-    reasoning_content in the thinking mode must be passed back to the API").
+    whose ``error.message`` field contains the actual diagnostic.
     ``raise_for_status()`` throws that detail away, so we surface it here to
     make the failure diagnosable from the terminal alone.
     """

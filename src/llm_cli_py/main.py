@@ -100,21 +100,6 @@ def build_parser() -> argparse.ArgumentParser:
         "Defaults to the main LLM model if not specified.",
     )
     parser.add_argument(
-        "--enable-thinking",
-        action="store_true",
-        help="Enable the model's thinking/reasoning mode. By default thinking is "
-        "disabled to cut latency and reasoning tokens: a provider-specific "
-        "'thinking off' parameter is added to every request where the provider "
-        "supports it. The exact request field is auto-selected from the API URL: "
-        "OpenRouter uses the unified `reasoning: {effort: none}`, Ollama uses "
-        "`reasoning_effort: none`, and OpenAI uses `reasoning_effort: low` "
-        "(reduces but cannot fully disable o-series reasoning). Pass "
-        "--enable-thinking to leave the request unchanged so the model may "
-        "reason normally. Also read from the LLM_CLI_ENABLE_THINKING env var "
-        "when the flag is not given.",
-    )
-
-    parser.add_argument(
         "-l",
         "--log-file",
         help=(
@@ -237,35 +222,12 @@ def main() -> None:
     # Priority: 1) --verifier-model, 2) LLM_CLI_VERIFIER_MODEL env, 3) main model
     verifier_model = args.verifier_model or os.environ.get(ENV_VERIFIER_MODEL) or model
 
-    # ── Thinking mode ──────────────────────────────────────────────
-    # Thinking is OFF by default: a provider-specific "thinking off" parameter
-    # is added to every request where the provider supports it. --enable-thinking
-    # turns it back on by simply leaving the request unchanged, so the model
-    # keeps its default behaviour. The provider-specific "thinking off" payload
-    # is decided later from the API URL by LlmApiClient / Verifier; here we only
-    # surface a warning when the endpoint type is unknown so the (default) off
-    # request may not actually stick.
-    enable_thinking = args.enable_thinking or os.environ.get(
-        "LLM_CLI_ENABLE_THINKING", ""
-    ).strip().lower() in ("1", "true", "yes", "on")
-    if not enable_thinking:
-        from .providers.llm_api import provider_thinking_off_payload
-
-        _fields, _supported = provider_thinking_off_payload(api_url)
-        if not _supported:
-            ui_display.report_warning(
-                "No provider-specific 'thinking off' field is known for "
-                f"endpoint '{api_url}'. Thinking may NOT be off here. "
-                "Pass --enable-thinking to keep the model's default behaviour."
-            )
-
     # ── Initialize verifier ─────────────────────────────────────────
     verifier = Verifier(
         api_url=api_url,
         api_key=api_key,
         model=verifier_model,
         timeout=DEFAULT_VERIFIER_TIMEOUT,
-        thinking=enable_thinking,
     )
     # The verifier is only used when approval_mode == "verifier". For "manual"
     # and "auto" it is left disabled at the session level (see SessionContext).
@@ -286,7 +248,6 @@ def main() -> None:
             api_url=api_url,
             api_key=api_key,
             timeout=request_timeout,
-            thinking=enable_thinking,
         ) as client,
         verifier,
     ):

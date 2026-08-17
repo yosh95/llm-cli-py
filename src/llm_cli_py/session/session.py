@@ -56,7 +56,7 @@ class ActiveSession:
         self.ctx = ctx
         self.trace_id = str(uuid.uuid4())
         # Optional file that receives the LLM conversation history (+ tool
-        # call logs) in the same TOML format as /dump (without reasoning).
+        # call logs) in the same TOML format as /dump.
         # It is overwritten at the end of every turn and every React-loop
         # iteration so that progress survives an abnormal exit.
         self._log_file = Path(log_file).expanduser() if log_file else None
@@ -189,11 +189,10 @@ class ActiveSession:
     def _write_log(self) -> None:
         """Write the current conversation history to the log file.
 
-        Produces the same TOML content as the ``/dump`` command (role/content,
-        no ``reasoning``). The whole file is overwritten on every call so that,
-        in case of an abnormal exit at any point, the most recent state is on
-        disk. Writes are best-effort: a failure is reported but does not stop
-        the session.
+        Produces the same TOML content as the ``/dump`` command (role/content).
+        The whole file is overwritten on every call so that, in case of an
+        abnormal exit at any point, the most recent state is on disk. Writes
+        are best-effort: a failure is reported but does not stop the session.
         """
         if not self._log_file:
             return

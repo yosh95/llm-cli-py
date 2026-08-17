@@ -41,24 +41,6 @@ class TestParseStreamResponse:
         assert result.tool_calls == []
         assert text_parts == ["Hello ", "world"]
 
-    def test_reasoning_stream_both_field_names(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        # reasoning_content (DeepSeek/Ollama) and reasoning (OpenRouter)
-        resp = _make_stream_response(
-            [
-                _chunk({"reasoning_content": "Step 1"}),
-                _chunk({"reasoning": "Step 2"}),
-                _chunk({"content": "Answer"}),
-                _chunk({}, finish_reason="stop"),
-                "data: [DONE]",
-            ]
-        )
-        reason_parts: list[str] = []
-        result = client._parse_stream_response(resp, on_reasoning=reason_parts.append)
-        assert result.reasoning == "Step 1\nStep 2"
-        assert result.text == "Answer"
-        assert reason_parts == ["Step 1", "Step 2"]
-
     def test_tool_call_arguments_buffered_and_parsed(self) -> None:
         client = LlmApiClient("m", "https://api.example.com/v1", "k")
         # arguments split across chunks as JSON fragments
@@ -166,39 +148,6 @@ class TestSendStreaming:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "python"
         assert result.tool_calls[0].arguments == {"code": "print(1)"}
-
-    def test_reasoning_round_trip_in_build_messages(self) -> None:
-        """DeepSeek V4 requires reasoning to be replayed with tool calls."""
-        from llm_cli_py.models import Message, Role
-
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        client._state.conversation = [
-            Message(
-                role=Role.ASSISTANT,
-                content="",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "python", "arguments": '{"code": "print(1)"}'},
-                    }
-                ],
-                reasoning="thinking trace here",
-            )
-        ]
-        messages = client._build_messages()
-        assistant = messages[-1]
-        assert assistant["reasoning"] == "thinking trace here"
-        assert assistant["tool_calls"] is not None
-
-    def test_build_messages_omits_reasoning_when_absent(self) -> None:
-        from llm_cli_py.models import Message, Role
-
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        client._state.conversation = [Message(role=Role.ASSISTANT, content="plain answer")]
-        messages = client._build_messages()
-        assistant = messages[-1]
-        assert "reasoning" not in assistant
 
     def test_send_streaming_broken_tool_call_returned_without_fallback(self) -> None:
         """Broken tool calls are returned as-is (no non-streaming fallback)."""
