@@ -72,3 +72,93 @@ class TestSlashCommands:
         assert session.ctx.verifier.enabled is False
         _handle_slash_command(session, "/verifier on")
         assert session.ctx.verifier.enabled is True
+
+
+class TestDumpCommand:
+    """The /dump slash command emits the conversation as TOML."""
+
+    def test_dump_emits_toml(self, capsys: pytest.CaptureFixture[str]) -> None:
+        session = _make_session()
+        session.client.state.conversation = [
+            Message(role=Role.USER, content="Hi there"),
+            Message(role=Role.ASSISTANT, content="Hello"),
+        ]
+        from llm_cli_py.session.interactive import _cmd_dump
+
+        result = _cmd_dump(session, "")
+        assert result is None
+        captured = capsys.readouterr()
+        assert 'role = "user"' in captured.out
+        assert 'role = "assistant"' in captured.out
+        assert "Hi there" in captured.out
+
+
+class TestVerifierSlashGuard:
+    """/verifier is guarded when approval mode is not 'verifier'."""
+
+    def test_verifier_command_warns_when_not_verifier_mode(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from llm_cli_py.consts import APPROVAL_MODE_MANUAL
+        from llm_cli_py.session.interactive import _cmd_verifier
+
+        session = _make_session()
+        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
+        result = _cmd_verifier(session, "on")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "not 'verifier'" in captured.out
+
+
+class TestInteractiveUserInput:
+    """The interactive input handler forwards text as a DataSource."""
+
+    def test_handle_user_input_builds_text_source(self) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import _handle_user_input
+
+        session = _make_session()
+        with patch.object(session, "process_and_print") as mock:
+            _handle_user_input(session, "hello")
+            mock.assert_called_once()
+            args = mock.call_args.args[0]
+            assert len(args) == 1
+            assert args[0].text == "hello"
+            assert args[0].source_type == "text"
+
+    def test_handle_user_input_surfaces_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import _handle_user_input
+
+        session = _make_session()
+        with patch.object(session, "process_and_print", side_effect=Exception("boom")):
+            _handle_user_input(session, "hello")
+        captured = capsys.readouterr()
+        assert "Failed to process input: boom" in captured.out
+
+
+class TestRunInteractive:
+    """The interactive loop terminates cleanly on EOF / Ctrl-C."""
+
+    def test_eof_exits_loop(self) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import run_interactive
+
+        session = _make_session()
+        with patch("llm_cli_py.session.interactive.prompt", side_effect=EOFError()):
+            run_interactive(session)  # must not raise
+
+    def test_keyboard_interrupt_then_eof(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import run_interactive
+
+        session = _make_session()
+        with patch(
+            "llm_cli_py.session.interactive.prompt",
+            side_effect=[KeyboardInterrupt(), EOFError()],
+        ):
+            run_interactive(session)
+        captured = capsys.readouterr()
+        assert "Use /quit to exit" in captured.out

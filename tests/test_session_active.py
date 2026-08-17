@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_cli_py.consts import APPROVAL_MODE_VERIFIER
+from llm_cli_py.consts import APPROVAL_MODE_AUTO, APPROVAL_MODE_MANUAL, APPROVAL_MODE_VERIFIER
 from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext

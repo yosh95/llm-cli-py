@@ -151,3 +151,27 @@ class TestFormatToolResultEdgeCases:
     def test_format_none_result(self) -> None:
         output = format_tool_result(None)
         assert "null" in output or "None" in output
+
+
+class TestSanitizeTerminalOutput:
+    """Terminal output sanitization strips ANSI/control chars."""
+
+    def test_removes_ansi_escapes(self) -> None:
+        from llm_cli_py.ui.display import _sanitize_terminal_output
+
+        assert _sanitize_terminal_output("ab\x1b[31mred\x1b[0m") == "abred"
+
+    def test_removes_carriage_returns(self) -> None:
+        from llm_cli_py.ui.display import _sanitize_terminal_output
+
+        assert _sanitize_terminal_output("a\rb") == "ab"
+
+    def test_keeps_newline_and_tab(self) -> None:
+        from llm_cli_py.ui.display import _sanitize_terminal_output
+
+        assert _sanitize_terminal_output("a\n\tb") == "a\n\tb"
+
+    def test_removes_other_control_chars(self) -> None:
+        from llm_cli_py.ui.display import _sanitize_terminal_output
+
+        assert _sanitize_terminal_output("a\x07b") == "ab"
