@@ -37,7 +37,7 @@ llm-cli-py -m gpt-4o
 pip install -e "[proxy]"
 export LLM_CLI_API_KEY="your-api-key"
 export LLM_CLI_MODEL="gpt-4o"
-export BRAVE_API_KEY="your-brave-api-key"
+export BRAVE_SEARCH_API_KEY="your-brave-api-key"
 python proxy/llm_proxy.py
 
 # On any client PC:
@@ -57,7 +57,7 @@ llm-cli-py
 | `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
 | `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
 | `PROXY_PORT` | Port the proxy listens on (default `8080`). |
-| `BRAVE_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
 | `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
 | `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
@@ -163,7 +163,7 @@ client live, so streaming works end-to-end over the LAN proxy as well.
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
-2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_API_KEY` env var, or proxy if `LLM_CLI_PROXY_URL` is set)
+2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_SEARCH_API_KEY` env var, or proxy if `LLM_CLI_PROXY_URL` is set)
 
 ## Development
 

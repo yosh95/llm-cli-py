@@ -9,7 +9,7 @@ from ..consts import (
     BRAVE_SEARCH_API_URL,
     BRAVE_SEARCH_MAX_RETRIES,
     DEFAULT_WEB_SEARCH_TIMEOUT,
-    ENV_BRAVE_API_KEY,
+    ENV_BRAVE_SEARCH_API_KEY,
     ENV_PROXY_URL,
 )
 from .types import SearchResult, SearchResultItem, ToolError
@@ -23,7 +23,7 @@ def web_search(
     If ``LLM_CLI_PROXY_URL`` is set, the request is sent to ``{proxy_url}/web_search``
     so the proxy can inject the API key server-side.
 
-    Otherwise, uses ``BRAVE_API_KEY`` environment variable for authentication
+    Otherwise, uses ``BRAVE_SEARCH_API_KEY`` environment variable for authentication
     and sends the request directly to the Brave Search API.
 
     Uses the LLM Context API endpoint (``/res/v1/llm/context``) which returns
@@ -47,10 +47,10 @@ def web_search(
         use_get = False
     else:
         api_url = BRAVE_SEARCH_API_URL
-        api_key = os.environ.get(ENV_BRAVE_API_KEY, "").strip()
+        api_key = os.environ.get(ENV_BRAVE_SEARCH_API_KEY, "").strip()
         if not api_key:
             return ToolError(
-                error=f"{ENV_BRAVE_API_KEY} is not set. "
+                error=f"{ENV_BRAVE_SEARCH_API_KEY} is not set. "
                 "Please set this environment variable to use the web search tool."
             )
         headers = {

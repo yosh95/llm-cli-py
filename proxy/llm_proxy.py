@@ -25,13 +25,13 @@ ENVIRONMENT VARIABLES (set on the proxy server):
   LLM_CLI_API_URL              - Actual LLM API base (default: http://localhost:11434/v1)
   LLM_CLI_MODEL                - Model to inject into client requests (e.g. gpt-4o).
                                  The proxy injects this server-side.
-  BRAVE_API_KEY                - Brave Search API key (for /web_search routing).
+  BRAVE_SEARCH_API_KEY                - Brave Search API key (for /web_search routing).
   PROXY_PORT                   - Port to listen on (default: 8080)
   LOG_LEVEL                    - DEBUG, INFO, WARNING, ERROR (default: INFO)
 
 CLIENT USAGE (any PC in LAN):
   export LLM_CLI_PROXY_URL=http://<proxy-ip>:8080
-  # No LLM_CLI_API_KEY, LLM_CLI_MODEL, or BRAVE_API_KEY needed!
+  # No LLM_CLI_API_KEY, LLM_CLI_MODEL, or BRAVE_SEARCH_API_KEY needed!
   # The proxy injects everything server-side.
   llm-cli-py
 """
@@ -55,7 +55,7 @@ DEFAULT_BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/llm/context"
 LLM_API_KEY = os.environ.get("LLM_CLI_API_KEY", "").strip()
 LLM_API_URL = os.environ.get("LLM_CLI_API_URL", DEFAULT_LLM_API_URL).rstrip("/")
 LLM_MODEL = os.environ.get("LLM_CLI_MODEL", "").strip()
-BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "").strip()
+BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
 PROXY_PORT = int(os.environ.get("PROXY_PORT", str(DEFAULT_PORT)))
 
 # Maximum accepted request body size in bytes (aiohttp's client_max_size).
@@ -338,8 +338,8 @@ async def handle_web_search(request: web.Request) -> web.StreamResponse:
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
     }
-    if BRAVE_API_KEY:
-        brave_headers["X-Subscription-Token"] = BRAVE_API_KEY
+    if BRAVE_SEARCH_API_KEY:
+        brave_headers["X-Subscription-Token"] = BRAVE_SEARCH_API_KEY
 
     params = {"q": query}
 
@@ -757,8 +757,8 @@ async def handle_root(_request: web.Request) -> web.Response:
         {"✓ Configured" if LLM_API_KEY else "✗ NOT SET"}</td></tr>
       <tr><td>LLM Backend</td><td><code>{LLM_API_URL}</code></td></tr>
       <tr><td>LLM Model</td><td><code>{LLM_MODEL or "(client must provide)"}</code></td></tr>
-      <tr><td>Brave Search Key</td><td class="{"ok" if BRAVE_API_KEY else "err"}">
-        {"✓ Configured" if BRAVE_API_KEY else "✗ NOT SET"}</td></tr>
+      <tr><td>Brave Search Key</td><td class="{"ok" if BRAVE_SEARCH_API_KEY else "err"}">
+        {"✓ Configured" if BRAVE_SEARCH_API_KEY else "✗ NOT SET"}</td></tr>
       <tr><td>Listening on</td><td><code>http://0.0.0.0:{PROXY_PORT}</code></td></tr>
     </table>
   </div>
@@ -813,7 +813,7 @@ Multi-purpose Proxy for LLM API + Brave Search
 LLM Backend: {LLM_API_URL}
 LLM Model:   {LLM_MODEL or "(client must provide)"}
 LLM API Key: {"✓ SET" if LLM_API_KEY else "✗ NOT SET"}
-Brave Search Key: {"✓ SET" if BRAVE_API_KEY else "✗ NOT SET"}
+Brave Search Key: {"✓ SET" if BRAVE_SEARCH_API_KEY else "✗ NOT SET"}
 Listening on: http://0.0.0.0:{PROXY_PORT}
 Client Setup (on any LAN PC):
 {client_lines}
@@ -834,8 +834,8 @@ def main() -> None:
     """Start the proxy server."""
     if not LLM_API_KEY:
         log.warning("LLM_CLI_API_KEY is not set! LLM API calls will fail.")
-    if not BRAVE_API_KEY:
-        log.warning("BRAVE_API_KEY is not set! Brave Search calls will fail.")
+    if not BRAVE_SEARCH_API_KEY:
+        log.warning("BRAVE_SEARCH_API_KEY is not set! Brave Search calls will fail.")
 
     app = web.Application(middlewares=[connect_middleware], client_max_size=MAX_BODY_SIZE)
     app.router.add_route("*", "/{tail:.*}", dispatcher)

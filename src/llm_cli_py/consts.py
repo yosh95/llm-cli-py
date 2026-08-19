@@ -59,7 +59,7 @@ DEFAULT_API_URL = "http://localhost:11434/v1"
 """Default LLM API base URL (OpenAI-compatible endpoint)."""
 
 # Brave Search API
-ENV_BRAVE_API_KEY = "BRAVE_API_KEY"
+ENV_BRAVE_SEARCH_API_KEY = "BRAVE_SEARCH_API_KEY"
 """Environment variable for the Brave Search API key."""
 
 BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/llm/context"

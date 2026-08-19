@@ -196,7 +196,7 @@ class TestWebSearchTool:
         with (
             patch.dict(
                 "os.environ",
-                {"BRAVE_API_KEY": "test-key-123"},
+                {"BRAVE_SEARCH_API_KEY": "test-key-123"},
             ),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response) as mock_get,
         ):
@@ -228,7 +228,7 @@ class TestWebSearchTool:
         mock_response.json.return_value = {"grounding": {"generic": []}}
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response),
         ):
             result = web_search(query="xyzzy_nonexistent_12345")
@@ -254,7 +254,7 @@ class TestWebSearchTool:
         }
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response),
         ):
             result = web_search(query="no snippet")
@@ -282,7 +282,7 @@ class TestWebSearchTool:
         }
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response),
         ):
             result = web_search(query="multi snippet")
@@ -300,7 +300,7 @@ class TestWebSearchTool:
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 500 Error")
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_response),
             patch("llm_cli_py.tools.web_search.time.sleep"),
         ):
@@ -329,7 +329,7 @@ class TestWebSearchTool:
         }
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch(
                 "llm_cli_py.tools.web_search.requests.get",
                 side_effect=[mock_fail, mock_success],
@@ -349,7 +349,7 @@ class TestWebSearchTool:
         mock_fail.status_code = 429
 
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch("llm_cli_py.tools.web_search.requests.get", return_value=mock_fail),
             patch("llm_cli_py.tools.web_search.time.sleep"),
         ):
@@ -362,7 +362,7 @@ class TestWebSearchTool:
     def test_network_error(self) -> None:
         """Test network connectivity error returns ToolError."""
         with (
-            patch.dict("os.environ", {"BRAVE_API_KEY": "key"}),
+            patch.dict("os.environ", {"BRAVE_SEARCH_API_KEY": "key"}),
             patch(
                 "llm_cli_py.tools.web_search.requests.get",
                 side_effect=requests.exceptions.ConnectionError("Connection refused"),
@@ -376,12 +376,12 @@ class TestWebSearchTool:
         assert "failed after 3 attempts" in result.error
 
     def test_missing_api_key(self) -> None:
-        """Test that missing BRAVE_API_KEY returns ToolError."""
+        """Test that missing BRAVE_SEARCH_API_KEY returns ToolError."""
         with patch.dict("os.environ", {}, clear=True):
             result = web_search(query="test")
 
         assert isinstance(result, ToolError)
-        assert "BRAVE_API_KEY" in result.error
+        assert "BRAVE_SEARCH_API_KEY" in result.error
 
     def test_proxy_url_uses_post(self) -> None:
         """Test that when LLM_CLI_PROXY_URL is set, it uses POST."""
