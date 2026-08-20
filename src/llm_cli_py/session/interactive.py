@@ -48,7 +48,7 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     state = session.client.state
     api_url = session.client.api_url
     ui.display.print_info("API URL", api_url if api_url else "not configured")
-    display_model = state.model if state.model else "not specified (proxy will inject)"
+    display_model = state.model if state.model else "not specified"
     ui.display.print_info("Model", display_model)
     ui.display.print_info("Approval mode", session.ctx.approval_mode)
     v = session.ctx.verifier

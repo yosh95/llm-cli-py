@@ -383,37 +383,6 @@ class TestWebSearchTool:
         assert isinstance(result, ToolError)
         assert "BRAVE_SEARCH_API_KEY" in result.error
 
-    def test_proxy_url_uses_post(self) -> None:
-        """Test that when LLM_CLI_PROXY_URL is set, it uses POST."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "grounding": {
-                "generic": [
-                    {
-                        "title": "Proxy Result",
-                        "url": "https://example.com",
-                        "snippets": ["Via proxy"],
-                    },
-                ]
-            }
-        }
-
-        with (
-            patch.dict("os.environ", {"LLM_CLI_PROXY_URL": "http://proxy:8080"}),
-            patch("llm_cli_py.tools.web_search.requests.post", return_value=mock_response) as mock_post,
-        ):
-            result = web_search(query="proxy test")
-
-        assert isinstance(result, SearchResult)
-        assert result.results[0].title == "Proxy Result"
-        mock_post.assert_called_once_with(
-            "http://proxy:8080/web_search",
-            json={"query": "proxy test"},
-            headers={"Content-Type": "application/json"},
-            timeout=30,
-        )
-
 
 # ══════════════════════════════════════════════════════════════════════
 # ToolRegistry tests

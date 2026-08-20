@@ -25,7 +25,6 @@ from .consts import (
     ENV_API_KEY,
     ENV_API_URL,
     ENV_MODEL,
-    ENV_PROXY_URL,
     ENV_VERIFIER_MODEL,
 )
 from .models import DataSource
@@ -73,12 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--api-key",
         help=f"API key. Overrides {ENV_API_KEY} env var.",
-    )
-    parser.add_argument(
-        "--proxy-url",
-        help=f"Proxy URL. Overrides {ENV_PROXY_URL} env var. "
-        "When set, both LLM API and Brave Search requests go through this proxy. "
-        "The proxy handles API key and model injection server-side.",
     )
     parser.add_argument(
         "-am",
@@ -165,34 +158,21 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    # ── Resolve API URL / Proxy URL ──────────────────────────────
-    # Priority: 1) --proxy-url, 2) LLM_CLI_PROXY_URL env
-    proxy_url = (args.proxy_url or os.environ.get(ENV_PROXY_URL, "")).strip()
+    # ── Resolve API URL / API key ─────────────────────────────────
+    # Priority: 1) --api-url, 2) LLM_CLI_API_URL env
+    api_url = (args.api_url or os.environ.get(ENV_API_URL, "")).strip()
+    if not api_url:
+        ui_display.report_error(
+            f"{ENV_API_URL} is not set. "
+            "Please set it:\n"
+            f"  export {ENV_API_URL}=http://localhost:11434/v1\n"
+            "Or use the --api-url CLI flag."
+        )
+        sys.exit(1)
 
-    # When proxy is set, it overrides the API URL and Brave Search URL.
-    # The proxy handles API key and model injection server-side.
-    if proxy_url:
-        # Set env var so tools (web_search) can pick it up
-        os.environ[ENV_PROXY_URL] = proxy_url
-        api_url = proxy_url.rstrip("/")
-        api_key = ""  # Proxy injects the API key
-        ui_display.report_info(f"Using proxy: {proxy_url}")
-    else:
-        # Priority: 1) --api-url, 2) LLM_CLI_API_URL env
-        api_url = (args.api_url or os.environ.get(ENV_API_URL, "")).strip()
-        if not api_url:
-            ui_display.report_error(
-                f"Neither {ENV_PROXY_URL} nor {ENV_API_URL} is set. "
-                "Please set one of them:\n"
-                f"  export {ENV_PROXY_URL}=http://<proxy-ip>:8080   (for proxy mode)\n"
-                f"  export {ENV_API_URL}=http://localhost:11434/v1   (for direct API access)\n"
-                "Or use the corresponding --proxy-url / --api-url CLI flags."
-            )
-            sys.exit(1)
-
-        # API key is optional (e.g., local Ollama instances do not require one)
-        # Priority: 1) --api-key, 2) LLM_CLI_API_KEY env
-        api_key = (args.api_key or os.environ.get(ENV_API_KEY, "")).strip()
+    # API key is optional (e.g., local Ollama instances do not require one)
+    # Priority: 1) --api-key, 2) LLM_CLI_API_KEY env
+    api_key = (args.api_key or os.environ.get(ENV_API_KEY, "")).strip()
 
     # ── Handle subcommands ─────────────────────────────────────────
     if args.command == "models":
@@ -207,8 +187,6 @@ def main() -> None:
 
     # ── Resolve model ──────────────────────────────────────────────
     # Priority: 1) -m/--model, 2) LLM_CLI_MODEL env
-    # If neither is set, the model is left empty — the proxy will inject
-    # the model name server-side via its own LLM_CLI_MODEL env var.
     model = args.model or os.environ.get(ENV_MODEL, "")
 
     # ── Request timeout ────────────────────────────────────────────

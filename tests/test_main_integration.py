@@ -37,8 +37,7 @@ class TestMainIntegration:
     def test_main_exits_without_api_url(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When neither LLM_CLI_PROXY_URL nor LLM_CLI_API_URL is set, main should error."""
-        monkeypatch.delenv("LLM_CLI_PROXY_URL", raising=False)
+        """When LLM_CLI_API_URL is not set, main should error."""
         monkeypatch.delenv("LLM_CLI_API_URL", raising=False)
         monkeypatch.delenv("LLM_CLI_API_KEY", raising=False)
         monkeypatch.setattr("sys.argv", ["llm-cli-py", "-m", "gpt-4o"])
@@ -47,7 +46,6 @@ class TestMainIntegration:
         with pytest.raises(SystemExit):
             main_module.main()
         captured = capsys.readouterr()
-        assert "LLM_CLI_PROXY_URL" in captured.out
         assert "LLM_CLI_API_URL" in captured.out
 
     def test_main_works_without_api_key(

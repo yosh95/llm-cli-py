@@ -6,7 +6,6 @@ from llm_cli_py.consts import (
     ENV_API_KEY,
     ENV_API_URL,
     ENV_MODEL,
-    ENV_PROXY_URL,
     ENV_VERIFIER_MODEL,
 )
 
@@ -21,6 +20,3 @@ class TestConsts:
 
     def test_verifier_model_env_var(self) -> None:
         assert ENV_VERIFIER_MODEL == "LLM_CLI_VERIFIER_MODEL"
-
-    def test_proxy_url_env_var(self) -> None:
-        assert ENV_PROXY_URL == "LLM_CLI_PROXY_URL"

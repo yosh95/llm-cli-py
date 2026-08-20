@@ -64,7 +64,7 @@ class ActiveSession:
     def process_and_print(self, data: list[DataSource]) -> None:
         """Main processing loop: send to LLM, handle tool calls, display results."""
         if not self.client.state.model:
-            ui.display.report_info("No model specified locally. The proxy will inject the model server-side.")
+            ui.display.report_info("No model specified locally.")
 
         if (
             self.ctx.approval_mode == APPROVAL_MODE_VERIFIER

@@ -126,7 +126,6 @@ class Verifier:
 
     @property
     def is_configured(self) -> bool:
-        # If no model is set, the proxy is expected to inject it server-side.
         return bool(self._api_url)
 
     @property

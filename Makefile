@@ -23,14 +23,11 @@ test:   ## Run pytest
 install: ## Run pip install -e . (CLI only)
 	pip install -e .
 
-install-proxy: ## Run pip install -e .[proxy] (CLI + proxy server)
-	pip install -e ".[proxy]"
-
 install-dev: ## Run pip install -e .[dev] (CLI + dev tools)
 	pip install -e ".[dev]"
 
-install-all: ## Run pip install -e .[proxy,dev] (everything)
-	pip install -e ".[proxy,dev]"
+install-all: ## Run pip install -e .[dev] (everything)
+	pip install -e ".[dev]"
 
 check-all: format check test  ## Run all checks: format → lint → test
 

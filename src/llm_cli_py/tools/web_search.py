@@ -10,7 +10,6 @@ from ..consts import (
     BRAVE_SEARCH_MAX_RETRIES,
     DEFAULT_WEB_SEARCH_TIMEOUT,
     ENV_BRAVE_SEARCH_API_KEY,
-    ENV_PROXY_URL,
 )
 from .types import SearchResult, SearchResultItem, ToolError
 
@@ -20,10 +19,7 @@ def web_search(
 ) -> SearchResult | ToolError:
     """Search the web using Brave Search API (LLM Context endpoint).
 
-    If ``LLM_CLI_PROXY_URL`` is set, the request is sent to ``{proxy_url}/web_search``
-    so the proxy can inject the API key server-side.
-
-    Otherwise, uses ``BRAVE_SEARCH_API_KEY`` environment variable for authentication
+    Uses the ``BRAVE_SEARCH_API_KEY`` environment variable for authentication
     and sends the request directly to the Brave Search API.
 
     Uses the LLM Context API endpoint (``/res/v1/llm/context``) which returns
@@ -38,47 +34,30 @@ def web_search(
     Returns:
         SearchResult on success, ToolError on failure.
     """
-    proxy_url = os.environ.get(ENV_PROXY_URL, "").strip()
-
-    if proxy_url:
-        # Use proxy for search
-        api_url = proxy_url.rstrip("/") + "/web_search"
-        headers = {"Content-Type": "application/json"}
-        use_get = False
-    else:
-        api_url = BRAVE_SEARCH_API_URL
-        api_key = os.environ.get(ENV_BRAVE_SEARCH_API_KEY, "").strip()
-        if not api_key:
-            return ToolError(
-                error=f"{ENV_BRAVE_SEARCH_API_KEY} is not set. "
-                "Please set this environment variable to use the web search tool."
-            )
-        headers = {
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip",
-            "X-Subscription-Token": api_key,
-        }
-        use_get = True
+    api_url = BRAVE_SEARCH_API_URL
+    api_key = os.environ.get(ENV_BRAVE_SEARCH_API_KEY, "").strip()
+    if not api_key:
+        return ToolError(
+            error=f"{ENV_BRAVE_SEARCH_API_KEY} is not set. "
+            "Please set this environment variable to use the web search tool."
+        )
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key,
+    }
 
     last_error: str | None = None
     max_retries = BRAVE_SEARCH_MAX_RETRIES
 
     for attempt in range(1, max_retries + 1):
         try:
-            if use_get:
-                resp = requests.get(
-                    api_url,
-                    params={"q": query},
-                    headers=headers,
-                    timeout=DEFAULT_WEB_SEARCH_TIMEOUT,
-                )
-            else:
-                resp = requests.post(
-                    api_url,
-                    json={"query": query},
-                    headers=headers,
-                    timeout=DEFAULT_WEB_SEARCH_TIMEOUT,
-                )
+            resp = requests.get(
+                api_url,
+                params={"q": query},
+                headers=headers,
+                timeout=DEFAULT_WEB_SEARCH_TIMEOUT,
+            )
 
             if resp.status_code in (429, 503):
                 last_error = f"HTTP {resp.status_code}: Rate limited or unavailable"

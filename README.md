@@ -7,7 +7,6 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 ## Features
 
 - **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, Anthropic via OpenRouter, local instances, etc.)
-- **Proxy Support** — Set `LLM_CLI_PROXY_URL` to route all requests through `llm_proxy.py`, which handles API key and model injection server-side
 - **Web Search** — Built-in `web_search` tool using Brave Search API
 - **Python Execution** — Built-in `execute_python` tool for running Python code
 - **Interactive Session** — Persistent chat with history and slash commands
@@ -18,8 +17,7 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 
 ```bash
 # Install
-pip install -e .            # CLI only
-pip install -e ".[proxy]"    # CLI + proxy server (includes aiohttp)
+pip install -e .
 
 # Set environment variables
 export LLM_CLI_API_URL="http://localhost:11434/v1"   # or any OpenAI-compatible endpoint
@@ -30,22 +28,6 @@ export LLM_CLI_MODEL="gpt-4o"                         # optional, can use -m fla
 llm-cli-py -m gpt-4o
 ```
 
-### Using the Proxy
-
-```bash
-# On the proxy server (install with proxy extra first):
-pip install -e "[proxy]"
-export LLM_CLI_API_KEY="your-api-key"
-export LLM_CLI_MODEL="gpt-4o"
-export BRAVE_SEARCH_API_KEY="your-brave-api-key"
-python proxy/llm_proxy.py
-
-# On any client PC:
-export LLM_CLI_PROXY_URL=http://<proxy-ip>:8080
-# No API keys or model needed!
-llm-cli-py
-```
-
 ## Environment Variables
 
 | Variable | Description |
@@ -54,10 +36,7 @@ llm-cli-py
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
 | `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
-| `LLM_CLI_PROXY_URL` | Proxy URL. When set, both LLM API and Brave Search requests go through this proxy. The proxy handles API key and model injection server-side. |
-| `PROXY_MAX_BODY_SIZE` | Max accepted request body size in bytes on the proxy (default 100 MiB). Raise it if you get HTTP 413 `Content Too Large` on long conversations that accumulate large tool results. |
-| `PROXY_PORT` | Port the proxy listens on (default `8080`). |
-| `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for `web_search` tool when not using proxy). |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for the `web_search` tool). |
 | `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
 | `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
@@ -80,9 +59,6 @@ llm-cli-py models
 
 # Override API URL and API key on the command line
 llm-cli-py --api-url https://api.example.com/v1 --api-key sk-your-key -m gpt-4o
-
-# Using proxy
-llm-cli-py --proxy-url http://proxy-server:8080
 ```
 
 ### OpenRouter Subcommand
@@ -157,21 +133,16 @@ tokens are rendered live as they arrive.
   verifier stream yields no content, it falls back to a non-streaming request
   so verification always completes.
 
-When routing through `llm_proxy.py`, the proxy relays the SSE stream to the
-client live, so streaming works end-to-end over the LAN proxy as well.
-
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
-2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_SEARCH_API_KEY` env var, or proxy if `LLM_CLI_PROXY_URL` is set)
+2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_SEARCH_API_KEY` env var)
 
 ## Development
 
 ```bash
 # Install dev dependencies
 pip install -e ".[dev]"
-# Include proxy support if you also want to test the proxy:
-pip install -e ".[proxy,dev]"
 
 # Run tests
 pytest
