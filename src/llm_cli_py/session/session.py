@@ -211,7 +211,7 @@ class ActiveSession:
 
             else:  # APPROVAL_MODE_AUTO
                 # Auto-approve everything.
-                ui.display.report_info(f"Auto-approved '{tc.name}' (--approval-mode auto).")
+                ui.display.report_info(f"Auto-approved '{tc.name}' (-a/--auto).")
 
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")

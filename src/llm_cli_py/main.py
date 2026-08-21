@@ -34,6 +34,36 @@ from .tools.web_search import WEB_SEARCH_DESCRIPTION, WEB_SEARCH_SCHEMA, web_sea
 from .ui import display as ui_display
 
 
+class _RemovedOptionAction(argparse.Action):
+    """Reject a removed option with a clear migration hint.
+
+    ``-am`` / ``--approval-mode`` were replaced by the ``-a`` / ``--auto``
+    flag. Registering the old spellings with this action makes argparse fail
+    fast with a helpful message instead of silently mis-parsing ``-am auto``
+    as ``-a -m auto`` (auto mode + model "auto").
+
+    The action is hidden from ``--help`` and the usage line
+    (``help=argparse.SUPPRESS``).
+    """
+
+    def __init__(self, option_strings: list[str], dest: str, **kwargs: object) -> None:
+        kwargs["nargs"] = 0
+        kwargs["help"] = argparse.SUPPRESS
+        super().__init__(option_strings, dest, **kwargs)  # type: ignore[arg-type]
+
+    def __call__(  # type: ignore[override]
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,  # noqa: ARG002
+        values: object,  # noqa: ARG002
+        option_string: str | None = None,
+    ) -> None:
+        parser.error(
+            f"{option_string} has been removed. "
+            "Use -a/--auto for auto mode, or no flag for manual mode (default)."
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -70,16 +100,22 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"API key. Overrides {ENV_API_KEY} env var.",
     )
     parser.add_argument(
+        "-a",
+        "--auto",
+        action="store_true",
+        help=(
+            "Auto mode: auto-approve every tool call. Default is manual mode, "
+            "where the human approves every tool call (HITL)."
+        ),
+    )
+    # Reject the removed -am/--approval-mode option with a migration hint.
+    # Registered AFTER -a so the exact spelling wins over option grouping
+    # (otherwise "-am auto" would silently parse as "-a -m auto").
+    parser.add_argument(
         "-am",
         "--approval-mode",
-        choices=[APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO],
-        default=APPROVAL_MODE_MANUAL,
-        help=(
-            "How tool calls are approved before execution: "
-            f"'{APPROVAL_MODE_MANUAL}' (default) asks the human to approve every "
-            "tool call (HITL); "
-            f"'{APPROVAL_MODE_AUTO}' auto-approves everything."
-        ),
+        action=_RemovedOptionAction,
+        dest=argparse.SUPPRESS,
     )
     parser.add_argument(
         "-l",
@@ -185,8 +221,10 @@ def main() -> None:
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
-    # ── Report approval mode ────────────────────────────────────────
-    if args.approval_mode == APPROVAL_MODE_MANUAL:
+    # ── Resolve approval mode ────────────────────────────────────────
+    # -a/--auto selects auto mode; the default is manual (HITL) mode.
+    approval_mode = APPROVAL_MODE_AUTO if args.auto else APPROVAL_MODE_MANUAL
+    if approval_mode == APPROVAL_MODE_MANUAL:
         ui_display.report_info("Approval mode: manual (HITL - you approve every tool call).")
     else:
         ui_display.report_info("Approval mode: auto (all tool calls auto-approved).")
@@ -200,7 +238,7 @@ def main() -> None:
     ) as client:
         ctx = SessionContext(
             tool_registry=tool_registry,
-            approval_mode=args.approval_mode,
+            approval_mode=approval_mode,
         )
         session = ActiveSession(client, ctx, log_file=args.log_file)
 

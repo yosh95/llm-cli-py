@@ -303,7 +303,7 @@ class TestApprovalIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Auto-approved 'safe_tool'" in captured.out
+        assert "Auto-approved 'safe_tool' (-a/--auto)." in captured.out
         assert "Executing tool: safe_tool" in captured.out
 
     def test_manual_mode_asks_user(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
