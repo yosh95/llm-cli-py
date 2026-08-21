@@ -16,7 +16,7 @@ class TestCliParser:
         assert args.command is None
         assert args.sources == []
         assert args.model is None
-        assert args.approval_mode == "verifier"
+        assert args.approval_mode == "manual"
 
     def test_model(self) -> None:
         parser = build_parser()
@@ -41,7 +41,7 @@ class TestCliParser:
     def test_approval_mode_default(self) -> None:
         parser = build_parser()
         args = parser.parse_args([])
-        assert args.approval_mode == "verifier"
+        assert args.approval_mode == "manual"
 
     def test_approval_mode_manual(self) -> None:
         parser = build_parser()
@@ -53,15 +53,11 @@ class TestCliParser:
         args = parser.parse_args(["--approval-mode", "auto"])
         assert args.approval_mode == "auto"
 
-    def test_verifier_model(self) -> None:
+    def test_approval_mode_verifier_rejected(self) -> None:
+        """The 'verifier' approval mode has been removed."""
         parser = build_parser()
-        args = parser.parse_args(["--verifier-model", "gpt-4o-mini"])
-        assert args.verifier_model == "gpt-4o-mini"
-
-    def test_verifier_model_default_none(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args([])
-        assert args.verifier_model is None
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--approval-mode", "verifier"])
 
     def test_sources(self) -> None:
         parser = build_parser()

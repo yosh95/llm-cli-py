@@ -60,7 +60,6 @@ class TestMainIntegration:
         # Should not exit - API key is optional
         with (
             patch("llm_cli_py.main.LlmApiClient"),
-            patch("llm_cli_py.main.Verifier"),
             patch("llm_cli_py.main.run_interactive"),
         ):
             main_module.main()
@@ -98,73 +97,3 @@ class TestMainIntegration:
             headers={"Authorization": "Bearer key"},
             timeout=30,
         )
-
-
-class TestVerifierModelResolution:
-    """Test verifier model resolution logic in main()."""
-
-    def test_verifier_model_from_cli_arg(self) -> None:
-        """CLI arg --verifier-model should take highest priority."""
-        env = {
-            "LLM_CLI_API_KEY": "key",
-            "LLM_CLI_API_URL": "https://api.example.com/v1",
-            "LLM_CLI_MODEL": "gpt-4o",
-            "LLM_CLI_VERIFIER_MODEL": "env-verifier-model",
-        }
-        with (
-            patch.dict("os.environ", env),
-            patch("sys.argv", ["llm-cli-py", "-m", "gpt-4o", "--verifier-model", "cli-verifier-model"]),
-            patch("llm_cli_py.main.LlmApiClient"),
-            patch("llm_cli_py.main.Verifier") as mock_verifier_cls,
-            patch("llm_cli_py.main.run_interactive"),
-        ):
-            from llm_cli_py import main as main_module
-
-            main_module.main()
-
-        _, kwargs = mock_verifier_cls.call_args
-        assert kwargs["model"] == "cli-verifier-model"
-
-    def test_verifier_model_from_env_var(self) -> None:
-        """LLM_CLI_VERIFIER_MODEL env var should be used when no CLI arg."""
-        env = {
-            "LLM_CLI_API_KEY": "key",
-            "LLM_CLI_API_URL": "https://api.example.com/v1",
-            "LLM_CLI_MODEL": "gpt-4o",
-            "LLM_CLI_VERIFIER_MODEL": "env-verifier-model",
-        }
-        with (
-            patch.dict("os.environ", env),
-            patch("sys.argv", ["llm-cli-py", "-m", "gpt-4o"]),
-            patch("llm_cli_py.main.LlmApiClient"),
-            patch("llm_cli_py.main.Verifier") as mock_verifier_cls,
-            patch("llm_cli_py.main.run_interactive"),
-        ):
-            from llm_cli_py import main as main_module
-
-            main_module.main()
-
-        _, kwargs = mock_verifier_cls.call_args
-        assert kwargs["model"] == "env-verifier-model"
-
-    def test_verifier_model_defaults_to_main_model(self) -> None:
-        """When neither CLI arg nor env var is set, verifier should use main model."""
-        env = {
-            "LLM_CLI_API_KEY": "key",
-            "LLM_CLI_API_URL": "https://api.example.com/v1",
-            "LLM_CLI_MODEL": "gpt-4o",
-            "LLM_CLI_VERIFIER_MODEL": "",  # explicitly unset to test default-to-main-model
-        }
-        with (
-            patch.dict("os.environ", env),
-            patch("sys.argv", ["llm-cli-py", "-m", "gpt-4o"]),
-            patch("llm_cli_py.main.LlmApiClient"),
-            patch("llm_cli_py.main.Verifier") as mock_verifier_cls,
-            patch("llm_cli_py.main.run_interactive"),
-        ):
-            from llm_cli_py import main as main_module
-
-            main_module.main()
-
-        _, kwargs = mock_verifier_cls.call_args
-        assert kwargs["model"] == "gpt-4o"

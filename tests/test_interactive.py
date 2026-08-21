@@ -9,7 +9,6 @@ from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.interactive import _handle_slash_command
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
-from llm_cli_py.verifier import Verifier
 
 
 def _make_session() -> ActiveSession:
@@ -18,7 +17,7 @@ def _make_session() -> ActiveSession:
         api_url="https://api.example.com/v1",
         api_key="key",
     )
-    ctx = SessionContext(tool_registry=ToolRegistry(), verifier=Verifier())
+    ctx = SessionContext(tool_registry=ToolRegistry())
     return ActiveSession(client, ctx)
 
 
@@ -64,15 +63,6 @@ class TestSlashCommands:
         captured = capsys.readouterr()
         assert "Unknown command" in captured.out
 
-    def test_verifier_toggle(self) -> None:
-        session = _make_session()
-        assert session.ctx.verifier
-        assert session.ctx.verifier.enabled is True
-        _handle_slash_command(session, "/v off")
-        assert session.ctx.verifier.enabled is False
-        _handle_slash_command(session, "/verifier on")
-        assert session.ctx.verifier.enabled is True
-
 
 class TestDumpCommand:
     """The /dump slash command emits the conversation as TOML."""
@@ -91,21 +81,6 @@ class TestDumpCommand:
         assert 'role = "user"' in captured.out
         assert 'role = "assistant"' in captured.out
         assert "Hi there" in captured.out
-
-
-class TestVerifierSlashGuard:
-    """/verifier is guarded when approval mode is not 'verifier'."""
-
-    def test_verifier_command_warns_when_not_verifier_mode(self, capsys: pytest.CaptureFixture[str]) -> None:
-        from llm_cli_py.consts import APPROVAL_MODE_MANUAL
-        from llm_cli_py.session.interactive import _cmd_verifier
-
-        session = _make_session()
-        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
-        result = _cmd_verifier(session, "on")
-        assert result is None
-        captured = capsys.readouterr()
-        assert "not 'verifier'" in captured.out
 
 
 class TestInteractiveUserInput:

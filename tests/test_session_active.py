@@ -1,23 +1,21 @@
 """Tests for ActiveSession - the core session processing logic.
 
-Covers process_and_print, tool call handling, verifier integration,
+Covers process_and_print, tool call handling (manual/auto approval),
 error handling.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from llm_cli_py.consts import APPROVAL_MODE_VERIFIER
+from llm_cli_py.consts import APPROVAL_MODE_AUTO, APPROVAL_MODE_MANUAL
 from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem, ToolError
-from llm_cli_py.verifier import Verifier
 
 
 @pytest.fixture
@@ -32,9 +30,7 @@ def mock_client() -> LlmApiClient:
 
 @pytest.fixture
 def session(mock_client: LlmApiClient) -> ActiveSession:
-    verifier = Verifier()
-    verifier.set_enabled(False)
-    ctx = SessionContext(tool_registry=ToolRegistry(), verifier=verifier)
+    ctx = SessionContext(tool_registry=ToolRegistry(), approval_mode=APPROVAL_MODE_AUTO)
     return ActiveSession(mock_client, ctx)
 
 
@@ -63,13 +59,15 @@ class TestProcessAndPrint:
         captured = capsys.readouterr()
         assert "No model specified locally" in captured.out
 
-    def test_verifier_not_configured(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        session.ctx.verifier = Verifier()  # not configured
-        session.process_and_print([DataSource(text="Hello")])
-        captured = capsys.readouterr()
-        assert "not configured" in captured.out
+    def test_session_context_defaults_to_manual(self) -> None:
+        """SessionContext defaults approval_mode to manual."""
+        ctx = SessionContext(tool_registry=ToolRegistry())
+        assert ctx.approval_mode == APPROVAL_MODE_MANUAL
+
+    def test_session_context_invalid_mode_falls_back_to_manual(self) -> None:
+        """An unknown approval mode falls back to manual."""
+        ctx = SessionContext(tool_registry=ToolRegistry(), approval_mode="verifier")
+        assert ctx.approval_mode == APPROVAL_MODE_MANUAL
 
     def test_llm_request_failure(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         with patch.object(session.client, "send", side_effect=Exception("API error")):
@@ -274,15 +272,13 @@ class TestProcessAndPrint:
         assert "API limit exceeded" in captured.out
 
 
-class TestVerifierIntegration:
-    """Test verifier integration in tool call handling."""
+class TestApprovalIntegration:
+    """Test manual/auto approval integration in tool call handling."""
 
-    def test_verifier_approves_tool(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.verify.return_value = (True, "Safe operation")
-        session.ctx.verifier = verifier
+    def test_auto_mode_auto_approves_tool(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """In auto mode the tool runs without asking the user."""
 
         def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
             return ExecResult(stdout="done")
@@ -307,49 +303,16 @@ class TestVerifierIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Verifier approved 'safe_tool'." in captured.out
-        # Since the verifier approved the call, the tool must be executed.
+        assert "Auto-approved 'safe_tool'" in captured.out
         assert "Executing tool: safe_tool" in captured.out
 
-    def test_verifier_context_has_only_purpose_and_tool_call(self, session: ActiveSession) -> None:
-        """The verifier receives only the tool's purpose + execution content,
-        not the full past history."""
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.verify.return_value = (True, "Safe operation")
-        session.ctx.verifier = verifier
-        session.ctx.approval_mode = APPROVAL_MODE_VERIFIER
-
-        # Pre-populate older history that the verifier must ignore.
-        session.client.state.conversation.append(
-            Message(role=Role.USER, content="Earlier unrelated question")
-        )
-        session.client.state.conversation.append(
-            Message(role=Role.ASSISTANT, content="Earlier answer about something")
-        )
-        # The current assistant message proposing the tool call: content is the
-        # tool's purpose, tool_calls holds the execution content.
-        session.client.state.conversation.append(
-            Message(
-                role=Role.ASSISTANT,
-                content="I will look up the weather.",
-                tool_calls=[
-                    {
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "safe_tool",
-                            "arguments": '{"query": "current weather"}',
-                        },
-                    }
-                ],
-            )
-        )
+    def test_manual_mode_asks_user(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
+        """In manual mode the user is prompted to approve the tool call."""
 
         def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
             return ExecResult(stdout="done")
 
+        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
         session.ctx.tool_registry.register(
             "safe_tool",
             "Safe",
@@ -357,39 +320,10 @@ class TestVerifierIntegration:
             safe_tool,
         )
 
-        tool_call = ToolCall(
-            id="call_1",
-            name="safe_tool",
-            arguments={"query": "current weather"},
-        )
-        session._handle_tool_calls([tool_call])
-
-        # Verifier got exactly the tool purpose + the tool call content.
-        assert verifier.verify.called
-        ctx = verifier.verify.call_args.args[1]
-        assert len(ctx) == 2
-        # 1st: the assistant's purpose explanation.
-        assert ctx[0] == {"role": "assistant", "content": "I will look up the weather."}
-        # 2nd: the tool execution content (name + arguments).
-        assert "safe_tool" in ctx[1]["content"]
-        assert "current weather" in ctx[1]["content"]
-        # Older history is NOT included.
-        assert not any("Earlier question" in m["content"] for m in ctx)
-        assert not any("Earlier answer" in m["content"] for m in ctx)
-
-    def test_verifier_rejects_tool_user_overrides(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.verify.return_value = (False, "Potentially dangerous")
-        session.ctx.verifier = verifier
-
-        tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
+        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
         responses = [
             LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
-            LlmResponse(text="Done", tool_calls=[]),
+            LlmResponse(text="All good!", tool_calls=[]),
         ]
         with (
             patch.object(
@@ -399,22 +333,30 @@ class TestVerifierIntegration:
             ),
             patch("llm_cli_py.session.session.prompt", return_value="y"),
         ):
-            session.process_and_print([DataSource(text="Run code")])
+            session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Executing tool" in captured.out
-        assert "User override" in captured.out
+        assert "User approved tool call (HITL)." in captured.out
+        assert "Executing tool: safe_tool" in captured.out
 
-    def test_verifier_rejects_user_skips(
+    def test_manual_mode_user_declines(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.verify.return_value = (False, "Writes to disk")
-        session.ctx.verifier = verifier
+        """When the user declines, the tool call is skipped and a tool
+        message records the refusal."""
 
-        tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
+        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
+            return ExecResult(stdout="done")
+
+        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
+        session.ctx.tool_registry.register(
+            "safe_tool",
+            "Safe",
+            {"type": "object", "properties": {}, "required": []},
+            safe_tool,
+        )
+
+        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
         responses = [
             LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
             LlmResponse(text="Done", tool_calls=[]),
@@ -427,84 +369,10 @@ class TestVerifierIntegration:
             ),
             patch("llm_cli_py.session.session.prompt", return_value="n"),
         ):
-            session.process_and_print([DataSource(text="Run code")])
-
-        captured = capsys.readouterr()
-        assert "skipped" in captured.out.lower()
-
-    def test_verifier_streams_response(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.model = "verifier-model"
-
-        def fake_verify(
-            _tc: object,
-            _ctx: object,
-            on_content: Callable[[str], None] | None = None,
-        ) -> tuple[bool, str]:
-            if on_content:
-                on_content('{"approved": true, "reason": "safe"}')
-            return (True, "safe")
-
-        verifier.verify.side_effect = fake_verify
-        session.ctx.verifier = verifier
-
-        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
-            return ExecResult(stdout="done")
-
-        session.ctx.tool_registry.register(
-            "safe_tool",
-            "Safe",
-            {"type": "object", "properties": {}, "required": []},
-            safe_tool,
-        )
-
-        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
-        responses = [
-            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
-            LlmResponse(text="All good!", tool_calls=[]),
-        ]
-        with patch.object(
-            session.client,
-            "send",
-            side_effect=responses,
-        ):
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Verifier:" in captured.out
-        # The content streaming callback was wired through to verify().
-        kwargs = verifier.verify.call_args.kwargs
-        assert kwargs["on_content"] is not None
-
-    def test_verifier_rejected_with_feedback(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        verifier = MagicMock(spec=Verifier)
-        verifier.enabled = True
-        verifier.is_configured = True
-        verifier.verify.return_value = (False, "Suspicious")
-        session.ctx.verifier = verifier
-
-        tool_call = ToolCall(id="call_1", name="python", arguments={"code": "print(1)"})
-        responses = [
-            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
-            LlmResponse(text="Done", tool_calls=[]),
-        ]
-        with (
-            patch.object(
-                session.client,
-                "send",
-                side_effect=responses,
-            ),
-            patch("llm_cli_py.session.session.prompt", return_value="This is actually safe because..."),
-        ):
-            session.process_and_print([DataSource(text="Run code")])
-
-        captured = capsys.readouterr()
-        assert "skipped" in captured.out.lower()
-        # Check that user feedback was added to conversation
-        assert any("User feedback" in m.content for m in session.client.state.conversation)
+        assert "Tool call skipped per user decision." in captured.out
+        assert "Executing tool" not in captured.out
+        # A tool message records the refusal for the LLM.
+        assert any(m.role == Role.TOOL and "declined" in m.content for m in session.client.state.conversation)

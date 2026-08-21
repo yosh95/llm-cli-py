@@ -7,7 +7,6 @@ from collections.abc import Callable
 import tomli_w
 
 from .. import ui
-from ..consts import APPROVAL_MODE_VERIFIER
 from ..models import DataSource
 from .prompt import prompt
 from .session import ActiveSession
@@ -25,9 +24,8 @@ def _cmd_help(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
         ("/help, /h", "Show this help message"),
         ("/quit, /q", "Exit the session"),
         ("/clear, /c", "Clear conversation history"),
-        ("/info, /i", "Show session info (API URL, model, verifier, tools)"),
+        ("/info, /i", "Show session info (API URL, model, tools)"),
         ("/dump", "Dump conversation history as TOML to stdout"),
-        ("/verifier [on|off], /v", "Toggle verifier (only when --approval-mode verifier)"),
     ]
     for cmd, desc in commands:
         ui.display.print_info(cmd, desc)
@@ -51,13 +49,6 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     display_model = state.model if state.model else "not specified"
     ui.display.print_info("Model", display_model)
     ui.display.print_info("Approval mode", session.ctx.approval_mode)
-    v = session.ctx.verifier
-    if v is None:
-        ui.display.print_info("Verifier", "Not configured")
-    elif session.ctx.approval_mode == APPROVAL_MODE_VERIFIER:
-        ui.display.print_info("Verifier", "Enabled" if v.enabled else "Disabled")
-    else:
-        ui.display.print_info("Verifier", "Unused (approval mode is not 'verifier')")
     tools = session.ctx.tool_registry.get_tool_names()
     ui.display.print_info("Available Tools", ", ".join(tools) if tools else "None")
     ui.display.print_info("Messages", str(len(state.conversation)))
@@ -80,33 +71,6 @@ def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
 
 # ── Command dispatch dictionary ────────────────────────────────────
 
-
-def _cmd_verifier(session: ActiveSession, args: str) -> str | None:
-    """Toggle the verifier on/off."""
-    v = session.ctx.verifier
-    if session.ctx.approval_mode != APPROVAL_MODE_VERIFIER:
-        ui.display.report_warning(
-            f"Approval mode is '{session.ctx.approval_mode}', not 'verifier'. "
-            "Restart with --approval-mode verifier to use the verifier toggle."
-        )
-        return None
-
-    if v is None:
-        ui.display.report_warning("Verifier is not configured.")
-        return None
-
-    arg = args.strip().lower()
-    if arg in ("on", "true", "1", ""):
-        v.set_enabled(True)
-        ui.display.report_success("Verifier enabled.")
-    elif arg in ("off", "false", "0"):
-        v.set_enabled(False)
-        ui.display.report_info("Verifier disabled. All tool calls allowed.")
-    else:
-        ui.display.report_error("Usage: /verifier [on|off]")
-    return None
-
-
 _SLASH_COMMANDS: dict[str, Callable[[ActiveSession, str], str | None]] = {
     "h": _cmd_help,
     "help": _cmd_help,
@@ -118,8 +82,6 @@ _SLASH_COMMANDS: dict[str, Callable[[ActiveSession, str], str | None]] = {
     "i": _cmd_info,
     "info": _cmd_info,
     "dump": _cmd_dump,
-    "v": _cmd_verifier,
-    "verifier": _cmd_verifier,
 }
 
 

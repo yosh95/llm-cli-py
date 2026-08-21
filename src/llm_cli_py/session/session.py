@@ -13,12 +13,10 @@ from ..base import LlmClient
 from ..consts import (
     APPROVAL_MODE_AUTO,
     APPROVAL_MODE_MANUAL,
-    APPROVAL_MODE_VERIFIER,
 )
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
-from ..verifier import Verifier
 from .prompt import prompt
 from .stream_state import StreamState
 
@@ -29,17 +27,14 @@ class SessionContext:
     def __init__(
         self,
         tool_registry: ToolRegistry,
-        verifier: Verifier | None = None,
-        approval_mode: str = APPROVAL_MODE_VERIFIER,
+        approval_mode: str = APPROVAL_MODE_MANUAL,
     ) -> None:
         self.tool_registry = tool_registry
-        self.verifier = verifier
         # Approval strategy for tool calls:
-        #   "verifier" -> use the LLM-based verifier (default).
-        #   "manual"   -> no verifier; prompt the human for every tool call (HITL).
-        #   "auto"     -> no verifier; auto-approve every tool call.
-        if approval_mode not in (APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO):
-            approval_mode = APPROVAL_MODE_VERIFIER
+        #   "manual" -> prompt the human for every tool call (HITL). Default.
+        #   "auto"   -> auto-approve every tool call.
+        if approval_mode not in (APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO):
+            approval_mode = APPROVAL_MODE_MANUAL
         self.approval_mode = approval_mode
 
 
@@ -65,20 +60,6 @@ class ActiveSession:
         """Main processing loop: send to LLM, handle tool calls, display results."""
         if not self.client.state.model:
             ui.display.report_info("No model specified locally.")
-
-        if (
-            self.ctx.approval_mode == APPROVAL_MODE_VERIFIER
-            and self.ctx.verifier
-            and self.ctx.verifier.enabled
-            and not self.ctx.verifier.is_configured
-        ):
-            ui.display.report_error(
-                "Verifier is enabled but not configured. "
-                "Tool calls cannot proceed.\n"
-                "  Use --approval-mode manual/auto to skip the verifier, "
-                "or disable it with /v off."
-            )
-            return
 
         current_data = data
 
@@ -206,15 +187,12 @@ class ActiveSession:
             ui.display.report_warning(f"Failed to write log file '{self._log_file}': {e}")
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
-        """Execute tool calls (with verification and optional user confirmation)."""
+        """Execute tool calls (with optional user confirmation)."""
         for tc in tool_calls:
             ui.display.print_tool_call(tc.name, tc.arguments)
 
-            approved = True
-            reason = ""
-
             if self.ctx.approval_mode == APPROVAL_MODE_MANUAL:
-                # No verifier: ask the human to approve every tool call (HITL).
+                # Ask the human to approve every tool call (HITL).
                 ui.display.print_rule()
                 raw_input_text = prompt(f"\U0001f91a Approve tool call '{tc.name}'? [Y/n] ").strip()
                 user_confirmation = raw_input_text.lower()
@@ -231,89 +209,9 @@ class ActiveSession:
                     )
                     continue
 
-            elif self.ctx.approval_mode == APPROVAL_MODE_AUTO:
-                # No verifier: auto-approve everything.
+            else:  # APPROVAL_MODE_AUTO
+                # Auto-approve everything.
                 ui.display.report_info(f"Auto-approved '{tc.name}' (--approval-mode auto).")
-
-            else:  # APPROVAL_MODE_VERIFIER (default)
-                if self.ctx.verifier and self.ctx.verifier.enabled:
-                    verifier_model = self.ctx.verifier.model if self.ctx.verifier.model else "LLM"
-                    ui.display.print_rule()
-                    print(f"\U0001f50d {verifier_model} checking...")
-
-                    # Only pass the most relevant context to the verifier:
-                    #  1. the assistant's explanation of why it wants to run the
-                    #     tool (the tool's purpose), and
-                    #  2. the tool call content (function name + arguments).
-                    # Earlier history is intentionally omitted to keep the
-                    # verifier focused on the current call and its rationale.
-                    ctx_messages: list[dict[str, str]] = []
-                    for m in reversed(self.client.state.conversation):
-                        if m.role != Role.ASSISTANT or not m.tool_calls:
-                            continue
-                        ctx_messages.append({"role": "assistant", "content": m.content or ""})
-                        # Reconstruct the tool call data (OpenAI format:
-                        #   name/arguments live under "function").
-                        calls = []
-                        for call in m.tool_calls:
-                            func = call.get("function", {})
-                            calls.append(f"{func.get('name', 'unknown')}({func.get('arguments', '')})")
-                        ctx_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": "Tool to execute: " + "; ".join(calls),
-                            }
-                        )
-                        break
-
-                    # Stream the verifier's response live, mirroring how the main
-                    # LLM turn is displayed.
-                    verifier_state = StreamState()
-
-                    def on_content(delta: str, _st: StreamState = verifier_state) -> None:
-                        if not _st.answer_open:
-                            ui.display.stream_start("Verifier:")
-                            _st.answer_open = True
-                        ui.display.stream_text(delta)
-
-                    approved, reason = self.ctx.verifier.verify(
-                        tc,
-                        ctx_messages,
-                        on_content=on_content,
-                    )
-
-                    if verifier_state.answer_open:
-                        ui.display.stream_end()
-
-                    ui.display.print_rule()
-                    if not approved:
-                        ui.display.report_warning(f"Verifier rejected '{tc.name}'.")
-                        raw_input_text = prompt("Execute anyway? [Y/n or feedback] ").strip()
-                        user_confirmation = raw_input_text.lower()
-                        if user_confirmation in ("", "y", "yes"):
-                            ui.display.report_info("User override: executing tool call.")
-                        else:
-                            ui.display.report_info("Tool call skipped per user decision.")
-                            self.client.state.conversation.append(
-                                Message(
-                                    role=Role.TOOL,
-                                    content=f"User declined after verifier rejection: {reason}",
-                                    tool_call_id=tc.id,
-                                )
-                            )
-                            if user_confirmation not in ("n", "no"):
-                                self.client.state.conversation.append(
-                                    Message(
-                                        role=Role.USER,
-                                        content=(
-                                            f"[User feedback on verifier rejection for tool "
-                                            f"'{tc.name}'] {raw_input_text}"
-                                        ),
-                                    )
-                                )
-                            continue
-                    else:
-                        ui.display.report_success(f"Verifier approved '{tc.name}'.")
 
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")

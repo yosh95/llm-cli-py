@@ -6,7 +6,6 @@ from llm_cli_py.consts import (
     ENV_API_KEY,
     ENV_API_URL,
     ENV_MODEL,
-    ENV_VERIFIER_MODEL,
 )
 
 
@@ -18,5 +17,13 @@ class TestConsts:
         assert ENV_API_URL == "LLM_CLI_API_URL"
         assert ENV_MODEL == "LLM_CLI_MODEL"
 
-    def test_verifier_model_env_var(self) -> None:
-        assert ENV_VERIFIER_MODEL == "LLM_CLI_VERIFIER_MODEL"
+    def test_approval_modes(self) -> None:
+        from llm_cli_py.consts import (
+            APPROVAL_MODE_AUTO,
+            APPROVAL_MODE_MANUAL,
+            APPROVAL_MODES,
+        )
+
+        assert APPROVAL_MODES == (APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO)
+        assert APPROVAL_MODE_MANUAL == "manual"
+        assert APPROVAL_MODE_AUTO == "auto"

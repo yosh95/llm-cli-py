@@ -10,7 +10,7 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 - **Web Search** — Built-in `web_search` tool using Brave Search API
 - **Python Execution** — Built-in `execute_python` tool for running Python code
 - **Interactive Session** — Persistent chat with history and slash commands
-- **Tool Verification** — Optional LLM-based verifier to approve/reject tool calls
+- **Approval Modes** — Choose between manual (HITL) approval of every tool call or full auto-approval
 - **Markdown Rendering** — CJK-friendly Markdown output with Rich
 
 ## Quick Start
@@ -35,7 +35,6 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
-| `LLM_CLI_VERIFIER_MODEL` | Separate model for tool call verification. Defaults to the main model. |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for the `web_search` tool). |
 | `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
 | `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
@@ -53,6 +52,9 @@ llm-cli-py -m gpt-4o -s README.md "Summarize this file"
 
 # Interactive mode
 llm-cli-py -m gpt-4o
+
+# Auto-approve all tool calls (default is manual approval)
+llm-cli-py -m gpt-4o --approval-mode auto
 
 # List available models
 llm-cli-py models
@@ -108,7 +110,6 @@ llm-cli-py or
 | `/clear`, `/c` | Clear conversation |
 | `/info`, `/i` | Show session info |
 | `/dump` | Dump conversation as TOML |
-| `/verifier`, `/v` | Toggle verifier on/off |
 
 ## Interactive Input
 
@@ -128,15 +129,20 @@ tokens are rendered live as they arrive.
   arguments are complete. If a provider emits a broken/truncated tool-call
   argument chunk, the call is surfaced with an explicit error and the turn
   exits (no silent non-streaming re-request).
-- The **Verifier** model is also streamed: its JSON verdict streams under
-  a `Verifier:` heading before the approve/reject verdict is printed. If the
-  verifier stream yields no content, it falls back to a non-streaming request
-  so verification always completes.
 
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
 2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_SEARCH_API_KEY` env var)
+
+## Tool Call Approval
+
+Tool calls are approved in one of two modes (`-am` / `--approval-mode`):
+
+| Mode | Description |
+|---|---|
+| `manual` (default) | Every tool call requires explicit human approval (HITL) before execution. |
+| `auto` | All tool calls are auto-approved without prompting. |
 
 ## Development
 

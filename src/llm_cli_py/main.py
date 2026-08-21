@@ -17,15 +17,12 @@ from .commands.openrouter import run_openrouter
 from .consts import (
     APPROVAL_MODE_AUTO,
     APPROVAL_MODE_MANUAL,
-    APPROVAL_MODE_VERIFIER,
     DEFAULT_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_URL_FETCH_TIMEOUT,
-    DEFAULT_VERIFIER_TIMEOUT,
     ENV_API_KEY,
     ENV_API_URL,
     ENV_MODEL,
-    ENV_VERIFIER_MODEL,
 )
 from .models import DataSource
 from .providers.llm_api import LlmApiClient
@@ -35,7 +32,6 @@ from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, exec
 from .tools.registry import ToolRegistry
 from .tools.web_search import WEB_SEARCH_DESCRIPTION, WEB_SEARCH_SCHEMA, web_search
 from .ui import display as ui_display
-from .verifier import Verifier
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,21 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-am",
         "--approval-mode",
-        choices=[APPROVAL_MODE_VERIFIER, APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO],
-        default=APPROVAL_MODE_VERIFIER,
+        choices=[APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO],
+        default=APPROVAL_MODE_MANUAL,
         help=(
             "How tool calls are approved before execution: "
-            f"'{APPROVAL_MODE_VERIFIER}' (default) uses the LLM-based verifier; "
-            f"'{APPROVAL_MODE_MANUAL}' skips the verifier and asks the human to "
-            "approve every tool call (HITL); "
-            f"'{APPROVAL_MODE_AUTO}' skips the verifier and auto-approves everything."
+            f"'{APPROVAL_MODE_MANUAL}' (default) asks the human to approve every "
+            "tool call (HITL); "
+            f"'{APPROVAL_MODE_AUTO}' auto-approves everything."
         ),
-    )
-    parser.add_argument(
-        "-vm",
-        "--verifier-model",
-        help=f"Model to use for the verifier. Overrides {ENV_VERIFIER_MODEL} env var. "
-        "Defaults to the main LLM model if not specified.",
     )
     parser.add_argument(
         "-l",
@@ -196,42 +185,21 @@ def main() -> None:
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
-    # ── Resolve verifier model ─────────────────────────────────────
-    # Priority: 1) --verifier-model, 2) LLM_CLI_VERIFIER_MODEL env, 3) main model
-    verifier_model = args.verifier_model or os.environ.get(ENV_VERIFIER_MODEL) or model
-
-    # ── Initialize verifier ─────────────────────────────────────────
-    verifier = Verifier(
-        api_url=api_url,
-        api_key=api_key,
-        model=verifier_model,
-        timeout=DEFAULT_VERIFIER_TIMEOUT,
-    )
-    # The verifier is only used when approval_mode == "verifier". For "manual"
-    # and "auto" it is left disabled at the session level (see SessionContext).
-    if args.approval_mode == APPROVAL_MODE_VERIFIER:
-        verifier.set_enabled(True)
-        ui_display.report_info("Approval mode: verifier (LLM-based verification).")
+    # ── Report approval mode ────────────────────────────────────────
+    if args.approval_mode == APPROVAL_MODE_MANUAL:
+        ui_display.report_info("Approval mode: manual (HITL - you approve every tool call).")
     else:
-        verifier.set_enabled(False)
-        if args.approval_mode == APPROVAL_MODE_MANUAL:
-            ui_display.report_info("Approval mode: manual (HITL - you approve every tool call).")
-        else:
-            ui_display.report_info("Approval mode: auto (all tool calls auto-approved).")
+        ui_display.report_info("Approval mode: auto (all tool calls auto-approved).")
 
     # ── Initialize LLM client and run session ────────────────────────
-    with (
-        LlmApiClient(
-            model=model,
-            api_url=api_url,
-            api_key=api_key,
-            timeout=request_timeout,
-        ) as client,
-        verifier,
-    ):
+    with LlmApiClient(
+        model=model,
+        api_url=api_url,
+        api_key=api_key,
+        timeout=request_timeout,
+    ) as client:
         ctx = SessionContext(
             tool_registry=tool_registry,
-            verifier=verifier,
             approval_mode=args.approval_mode,
         )
         session = ActiveSession(client, ctx, log_file=args.log_file)
