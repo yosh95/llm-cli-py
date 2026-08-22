@@ -48,7 +48,6 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     ui.display.print_info("API URL", api_url if api_url else "not configured")
     display_model = state.model if state.model else "not specified"
     ui.display.print_info("Model", display_model)
-    ui.display.print_info("Approval mode", session.ctx.approval_mode)
     tools = session.ctx.tool_registry.get_tool_names()
     ui.display.print_info("Available Tools", ", ".join(tools) if tools else "None")
     ui.display.print_info("Messages", str(len(state.conversation)))

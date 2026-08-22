@@ -4,7 +4,7 @@ prompt_toolkit manipulates the terminal directly (raw mode, alternate
 screen buffer, its own event loop). Initializing it more than once on the
 same tty can leave the terminal in a broken state, so this module creates
 one ``PromptSession`` lazily and reuses it for every prompt in the CLI --
-the main chat loop *and* the HITL confirmation prompts.
+the main chat loop.
 
 The previous ``InputBackend`` abstraction (which picked between plain
 ``input()`` and prompt_toolkit) has been removed: prompt_toolkit is used

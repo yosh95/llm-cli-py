@@ -10,7 +10,7 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 - **Web Search** — Built-in `web_search` tool using Brave Search API
 - **Python Execution** — Built-in `execute_python` tool for running Python code
 - **Interactive Session** — Persistent chat with history and slash commands
-- **Approval Modes** — Choose between manual (HITL) approval of every tool call (default) or full auto-approval (`-a`)
+- **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
 - **Markdown Rendering** — CJK-friendly Markdown output with Rich
 
 ## Quick Start
@@ -52,9 +52,6 @@ llm-cli-py -m gpt-4o -s README.md "Summarize this file"
 
 # Interactive mode
 llm-cli-py -m gpt-4o
-
-# Auto mode: auto-approve all tool calls (default is manual approval)
-llm-cli-py -m gpt-4o -a
 
 # List available models
 llm-cli-py models
@@ -115,7 +112,7 @@ llm-cli-py or
 
 The interactive session uses `prompt_toolkit`, which provides history,
 completion, and multiline editing. The `PromptSession` is created exactly once
-and shared across the main chat loop and HITL confirmation prompts, so
+and used by the main chat loop, so
 prompt_toolkit's terminal handling (raw mode, alternate screen buffer, its own
 event loop) is initialized only once and never conflicts with itself.
 
@@ -137,12 +134,8 @@ tokens are rendered live as they arrive.
 
 ## Tool Call Approval
 
-Tool calls are approved in one of two modes:
-
-| Mode | Flag | Description |
-|---|---|---|
-| `manual` (default) | *(none)* | Every tool call requires explicit human approval (HITL) before execution. |
-| `auto` | `-a` / `--auto` | All tool calls are auto-approved without prompting. |
+Tool calls are **always executed automatically** without prompting the user for
+confirmation. There is no manual/auto mode and no human-in-the-loop approval.
 
 ## Development
 

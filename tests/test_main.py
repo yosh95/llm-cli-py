@@ -16,7 +16,6 @@ class TestCliParser:
         assert args.command is None
         assert args.sources == []
         assert args.model is None
-        assert args.auto is False
 
     def test_model(self) -> None:
         parser = build_parser()
@@ -37,46 +36,6 @@ class TestCliParser:
         parser = build_parser()
         args = parser.parse_args([])
         assert args.api_key is None
-
-    def test_auto_default_off(self) -> None:
-        """Default is manual mode: -a/--auto is not set."""
-        parser = build_parser()
-        args = parser.parse_args([])
-        assert args.auto is False
-
-    def test_auto_flag_short(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["-a"])
-        assert args.auto is True
-
-    def test_auto_flag_long(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["--auto"])
-        assert args.auto is True
-
-    def test_auto_flag_with_model(self) -> None:
-        parser = build_parser()
-        args = parser.parse_args(["-a", "-m", "gpt-4o"])
-        assert args.auto is True
-        assert args.model == "gpt-4o"
-
-    def test_approval_mode_option_removed(self) -> None:
-        """--approval-mode has been removed."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--approval-mode", "auto"])
-
-    def test_am_option_removed(self) -> None:
-        """-am has been removed: it is no longer a valid flag."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["-am", "auto"])
-
-    def test_approval_mode_verifier_rejected(self) -> None:
-        """The 'verifier' approval mode has been removed."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["-am", "verifier"])
 
     def test_sources(self) -> None:
         parser = build_parser()

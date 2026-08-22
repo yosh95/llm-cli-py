@@ -15,8 +15,6 @@ from . import __version__
 from .commands.openrouter import add_subparser as add_openrouter_subparser
 from .commands.openrouter import run_openrouter
 from .consts import (
-    APPROVAL_MODE_AUTO,
-    APPROVAL_MODE_MANUAL,
     DEFAULT_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
     DEFAULT_URL_FETCH_TIMEOUT,
@@ -32,36 +30,6 @@ from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, exec
 from .tools.registry import ToolRegistry
 from .tools.web_search import WEB_SEARCH_DESCRIPTION, WEB_SEARCH_SCHEMA, web_search
 from .ui import display as ui_display
-
-
-class _RemovedOptionAction(argparse.Action):
-    """Reject a removed option with a clear migration hint.
-
-    ``-am`` / ``--approval-mode`` were replaced by the ``-a`` / ``--auto``
-    flag. Registering the old spellings with this action makes argparse fail
-    fast with a helpful message instead of silently mis-parsing ``-am auto``
-    as ``-a -m auto`` (auto mode + model "auto").
-
-    The action is hidden from ``--help`` and the usage line
-    (``help=argparse.SUPPRESS``).
-    """
-
-    def __init__(self, option_strings: list[str], dest: str, **kwargs: object) -> None:
-        kwargs["nargs"] = 0
-        kwargs["help"] = argparse.SUPPRESS
-        super().__init__(option_strings, dest, **kwargs)  # type: ignore[arg-type]
-
-    def __call__(  # type: ignore[override]
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,  # noqa: ARG002
-        values: object,  # noqa: ARG002
-        option_string: str | None = None,
-    ) -> None:
-        parser.error(
-            f"{option_string} has been removed. "
-            "Use -a/--auto for auto mode, or no flag for manual mode (default)."
-        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,24 +66,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--api-key",
         help=f"API key. Overrides {ENV_API_KEY} env var.",
-    )
-    parser.add_argument(
-        "-a",
-        "--auto",
-        action="store_true",
-        help=(
-            "Auto mode: auto-approve every tool call. Default is manual mode, "
-            "where the human approves every tool call (HITL)."
-        ),
-    )
-    # Reject the removed -am/--approval-mode option with a migration hint.
-    # Registered AFTER -a so the exact spelling wins over option grouping
-    # (otherwise "-am auto" would silently parse as "-a -m auto").
-    parser.add_argument(
-        "-am",
-        "--approval-mode",
-        action=_RemovedOptionAction,
-        dest=argparse.SUPPRESS,
     )
     parser.add_argument(
         "-l",
@@ -221,14 +171,6 @@ def main() -> None:
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
-    # ── Resolve approval mode ────────────────────────────────────────
-    # -a/--auto selects auto mode; the default is manual (HITL) mode.
-    approval_mode = APPROVAL_MODE_AUTO if args.auto else APPROVAL_MODE_MANUAL
-    if approval_mode == APPROVAL_MODE_MANUAL:
-        ui_display.report_info("Approval mode: manual (HITL - you approve every tool call).")
-    else:
-        ui_display.report_info("Approval mode: auto (all tool calls auto-approved).")
-
     # ── Initialize LLM client and run session ────────────────────────
     with LlmApiClient(
         model=model,
@@ -238,7 +180,6 @@ def main() -> None:
     ) as client:
         ctx = SessionContext(
             tool_registry=tool_registry,
-            approval_mode=approval_mode,
         )
         session = ActiveSession(client, ctx, log_file=args.log_file)
 

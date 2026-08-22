@@ -16,8 +16,6 @@ DEFAULT_URL_FETCH_TIMEOUT: int = 30
 """Default timeout for fetching URL content from CLI arguments."""
 
 
-# ── Other application-wide defaults ────────────────────────────────
-
 # ── Environment variable names ─────────────────────────────────────
 
 ENV_API_KEY = "LLM_CLI_API_KEY"
@@ -28,18 +26,6 @@ ENV_API_URL = "LLM_CLI_API_URL"
 
 ENV_MODEL = "LLM_CLI_MODEL"
 """Environment variable for the default LLM model."""
-
-# ── Approval mode constants ──────────────────────────────────────
-# Controls how tool calls are approved before execution:
-#   APPROVAL_MODE_MANUAL -- ask the human to approve every tool call
-#                           (HITL / human-in-the-loop). Default.
-#   APPROVAL_MODE_AUTO   -- auto-approve every tool call.
-APPROVAL_MODE_MANUAL = "manual"
-APPROVAL_MODE_AUTO = "auto"
-
-APPROVAL_MODES = (APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO)
-
-"""Environment variable overriding the LLM API request timeout in seconds."""
 
 DEFAULT_API_URL = "http://localhost:11434/v1"
 """Default LLM API base URL (OpenAI-compatible endpoint)."""

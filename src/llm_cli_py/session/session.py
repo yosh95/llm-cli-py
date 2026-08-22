@@ -10,14 +10,9 @@ import tomli_w
 
 from .. import ui
 from ..base import LlmClient
-from ..consts import (
-    APPROVAL_MODE_AUTO,
-    APPROVAL_MODE_MANUAL,
-)
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, SearchResult, ToolError
-from .prompt import prompt
 from .stream_state import StreamState
 
 
@@ -27,15 +22,8 @@ class SessionContext:
     def __init__(
         self,
         tool_registry: ToolRegistry,
-        approval_mode: str = APPROVAL_MODE_MANUAL,
     ) -> None:
         self.tool_registry = tool_registry
-        # Approval strategy for tool calls:
-        #   "manual" -> prompt the human for every tool call (HITL). Default.
-        #   "auto"   -> auto-approve every tool call.
-        if approval_mode not in (APPROVAL_MODE_MANUAL, APPROVAL_MODE_AUTO):
-            approval_mode = APPROVAL_MODE_MANUAL
-        self.approval_mode = approval_mode
 
 
 class ActiveSession:
@@ -187,31 +175,9 @@ class ActiveSession:
             ui.display.report_warning(f"Failed to write log file '{self._log_file}': {e}")
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
-        """Execute tool calls (with optional user confirmation)."""
+        """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
             ui.display.print_tool_call(tc.name, tc.arguments)
-
-            if self.ctx.approval_mode == APPROVAL_MODE_MANUAL:
-                # Ask the human to approve every tool call (HITL).
-                ui.display.print_rule()
-                raw_input_text = prompt(f"\U0001f91a Approve tool call '{tc.name}'? [Y/n] ").strip()
-                user_confirmation = raw_input_text.lower()
-                if user_confirmation in ("", "y", "yes"):
-                    ui.display.report_info("User approved tool call (HITL).")
-                else:
-                    ui.display.report_info("Tool call skipped per user decision.")
-                    self.client.state.conversation.append(
-                        Message(
-                            role=Role.TOOL,
-                            content=f"User declined tool call '{tc.name}'.",
-                            tool_call_id=tc.id,
-                        )
-                    )
-                    continue
-
-            else:  # APPROVAL_MODE_AUTO
-                # Auto-approve everything.
-                ui.display.report_info(f"Auto-approved '{tc.name}' (-a/--auto).")
 
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")

@@ -1,6 +1,6 @@
 """Tests for ActiveSession - the core session processing logic.
 
-Covers process_and_print, tool call handling (manual/auto approval),
+Covers process_and_print, tool call handling (automatic execution),
 error handling.
 """
 
@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import pytest
 
-from llm_cli_py.consts import APPROVAL_MODE_AUTO, APPROVAL_MODE_MANUAL
 from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
@@ -30,7 +29,7 @@ def mock_client() -> LlmApiClient:
 
 @pytest.fixture
 def session(mock_client: LlmApiClient) -> ActiveSession:
-    ctx = SessionContext(tool_registry=ToolRegistry(), approval_mode=APPROVAL_MODE_AUTO)
+    ctx = SessionContext(tool_registry=ToolRegistry())
     return ActiveSession(mock_client, ctx)
 
 
@@ -58,16 +57,6 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Hello")])
         captured = capsys.readouterr()
         assert "No model specified locally" in captured.out
-
-    def test_session_context_defaults_to_manual(self) -> None:
-        """SessionContext defaults approval_mode to manual."""
-        ctx = SessionContext(tool_registry=ToolRegistry())
-        assert ctx.approval_mode == APPROVAL_MODE_MANUAL
-
-    def test_session_context_invalid_mode_falls_back_to_manual(self) -> None:
-        """An unknown approval mode falls back to manual."""
-        ctx = SessionContext(tool_registry=ToolRegistry(), approval_mode="verifier")
-        assert ctx.approval_mode == APPROVAL_MODE_MANUAL
 
     def test_llm_request_failure(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         with patch.object(session.client, "send", side_effect=Exception("API error")):
@@ -273,12 +262,12 @@ class TestProcessAndPrint:
 
 
 class TestApprovalIntegration:
-    """Test manual/auto approval integration in tool call handling."""
+    """Tool calls are executed automatically without user confirmation."""
 
-    def test_auto_mode_auto_approves_tool(
+    def test_tool_executed_automatically(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """In auto mode the tool runs without asking the user."""
+        """Tools run without prompting the user."""
 
         def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
             return ExecResult(stdout="done")
@@ -303,76 +292,6 @@ class TestApprovalIntegration:
             session.process_and_print([DataSource(text="Run safe tool")])
 
         captured = capsys.readouterr()
-        assert "Auto-approved 'safe_tool' (-a/--auto)." in captured.out
         assert "Executing tool: safe_tool" in captured.out
-
-    def test_manual_mode_asks_user(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
-        """In manual mode the user is prompted to approve the tool call."""
-
-        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
-            return ExecResult(stdout="done")
-
-        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
-        session.ctx.tool_registry.register(
-            "safe_tool",
-            "Safe",
-            {"type": "object", "properties": {}, "required": []},
-            safe_tool,
-        )
-
-        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
-        responses = [
-            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
-            LlmResponse(text="All good!", tool_calls=[]),
-        ]
-        with (
-            patch.object(
-                session.client,
-                "send",
-                side_effect=responses,
-            ),
-            patch("llm_cli_py.session.session.prompt", return_value="y"),
-        ):
-            session.process_and_print([DataSource(text="Run safe tool")])
-
-        captured = capsys.readouterr()
-        assert "User approved tool call (HITL)." in captured.out
-        assert "Executing tool: safe_tool" in captured.out
-
-    def test_manual_mode_user_declines(
-        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """When the user declines, the tool call is skipped and a tool
-        message records the refusal."""
-
-        def safe_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
-            return ExecResult(stdout="done")
-
-        session.ctx.approval_mode = APPROVAL_MODE_MANUAL
-        session.ctx.tool_registry.register(
-            "safe_tool",
-            "Safe",
-            {"type": "object", "properties": {}, "required": []},
-            safe_tool,
-        )
-
-        tool_call = ToolCall(id="call_1", name="safe_tool", arguments={})
-        responses = [
-            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
-            LlmResponse(text="Done", tool_calls=[]),
-        ]
-        with (
-            patch.object(
-                session.client,
-                "send",
-                side_effect=responses,
-            ),
-            patch("llm_cli_py.session.session.prompt", return_value="n"),
-        ):
-            session.process_and_print([DataSource(text="Run safe tool")])
-
-        captured = capsys.readouterr()
-        assert "Tool call skipped per user decision." in captured.out
-        assert "Executing tool" not in captured.out
-        # A tool message records the refusal for the LLM.
-        assert any(m.role == Role.TOOL and "declined" in m.content for m in session.client.state.conversation)
+        # No approval prompt is shown.
+        assert "Approve tool call" not in captured.out
