@@ -18,9 +18,11 @@ from collections.abc import Iterable
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+
+from ..consts import PROMPT_HISTORY_FILE
 
 
 class SlashCommandCompleter(Completer):
@@ -82,8 +84,10 @@ def get_prompt_session() -> PromptSession[str]:
     """
     global _session
     if _session is None:
+        # Persist the input history to a hidden file (~/.llm_cli_py_history)
+        # so it survives across invocations, rather than living only in memory.
         _session = PromptSession(
-            history=InMemoryHistory(),
+            history=FileHistory(PROMPT_HISTORY_FILE),
             completer=SlashCommandCompleter(),
             key_bindings=build_key_bindings(),
             multiline=True,

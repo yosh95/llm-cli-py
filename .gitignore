@@ -20,7 +20,7 @@ venv/
 Thumbs.db
 
 # Project
-~/.llm-cli-py/
+~/.llm_cli_py_history
 
 # Tool caches
 .pytest_cache/

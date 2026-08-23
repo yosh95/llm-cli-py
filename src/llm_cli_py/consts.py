@@ -1,5 +1,7 @@
 """Constants for llm-cli-py."""
 
+from pathlib import Path
+
 # ── Timeout constants (seconds) ────────────────────────────────────
 
 DEFAULT_REQUEST_TIMEOUT: int = 300
@@ -43,3 +45,10 @@ relevance and ready for LLM consumption.
 
 BRAVE_SEARCH_MAX_RETRIES: int = 3
 """Maximum number of retries for Brave Search API requests."""
+
+
+# ── Prompt history ────────────────────────────────────────────────
+
+
+PROMPT_HISTORY_FILE = Path("~/.llm_cli_py_history").expanduser()
+"""File that persists the interactive prompt input history (a single hidden file in $HOME)."""
