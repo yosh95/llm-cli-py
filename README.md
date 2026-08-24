@@ -67,9 +67,7 @@ and model details. Short aliases make it even faster to type:
 
 | Alias | Description |
 |---|---|
-| `or` | Short for `openrouter` |
-| `opr` | Another short alias |
-| `ort` | Another short alias |
+| `o` | Short for `openrouter` |
 
 Sub-subcommands also have short forms:
 
@@ -86,16 +84,12 @@ llm-cli-py openrouter credits
 llm-cli-py openrouter model openai/gpt-4o
 
 # Short aliases
-llm-cli-py or r           # rankings
-llm-cli-py or c           # credits
-llm-cli-py or m openai/gpt-4o   # model details
-
-# Or use alternative aliases
-llm-cli-py opr rank
-llm-cli-py ort credit
+llm-cli-py o r           # rankings
+llm-cli-py o c           # credits
+llm-cli-py o m openai/gpt-4o   # model details
 
 # No subcommand → show both rankings and credits
-llm-cli-py or
+llm-cli-py o
 ```
 
 ### Slash Commands (Interactive Mode)

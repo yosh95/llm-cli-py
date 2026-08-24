@@ -32,9 +32,7 @@ class TestConstants:
     """Test the alias constant definitions."""
 
     def test_openrouter_aliases(self) -> None:
-        assert "or" in OPENROUTER_ALIASES
-        assert "opr" in OPENROUTER_ALIASES
-        assert "ort" in OPENROUTER_ALIASES
+        assert "o" in OPENROUTER_ALIASES
 
     def test_rankings_aliases(self) -> None:
         assert "r" in RANKINGS_ALIASES
