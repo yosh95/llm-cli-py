@@ -137,8 +137,6 @@ class ActiveSession:
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
-            ui.display.print_tool_call(tc.name, tc.arguments)
-
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
 
@@ -156,12 +154,6 @@ class ActiveSession:
 
             try:
                 result = tool.func(**tc.arguments)
-                result_str = ui.display.format_tool_result(result)
-                # Print tool results to the terminal. Web search results are
-                # shortened by format_tool_result (top result + truncated
-                # snippet) to avoid cluttering the display, while the full
-                # results are still passed to the LLM via conversation history.
-                ui.display.print_tool_result(result_str)
 
                 if isinstance(result, ToolError):
                     content_str = result.error

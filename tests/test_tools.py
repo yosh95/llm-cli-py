@@ -5,7 +5,6 @@ Covers:
 - Web Search tool (mocked API calls)
 - ToolRegistry (register, get, remove, clear, schemas, containment)
 - Result types (ExecResult, SearchResult, SearchResultItem, ToolError)
-- format_tool_result display formatting
 """
 
 from unittest.mock import MagicMock, patch
@@ -22,7 +21,6 @@ from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem, T
 from llm_cli_py.tools.web_search import (
     web_search,
 )
-from llm_cli_py.ui.display import format_tool_result
 
 # ══════════════════════════════════════════════════════════════════════
 # Python execution tool tests
@@ -663,70 +661,3 @@ class TestResultTypes:
         """Test ToolError with empty string."""
         err = ToolError(error="")
         assert err.error == ""
-
-
-# ══════════════════════════════════════════════════════════════════════
-# format_tool_result display tests
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestFormatToolResult:
-    """Test format_tool_result with typed results."""
-
-    def test_format_exec_result_with_output(self) -> None:
-        """Test formatting an ExecResult with stdout."""
-        result = ExecResult(stdout="Hello World\nLine 2", stderr="", exit_code=0)
-        output = format_tool_result(result)
-        assert "Hello World" in output
-        assert "Line 2" in output
-        assert "- exit_code: 0" in output
-        assert "- stdout:" in output
-        assert "- stderr: (no output)" in output
-
-    def test_format_exec_result_with_stderr(self) -> None:
-        """Test formatting an ExecResult with stderr."""
-        result = ExecResult(stdout="", stderr="Error: something broke", exit_code=1)
-        output = format_tool_result(result)
-        assert "- stdout: (no output)" in output
-        assert "Error: something broke" in output
-        assert "- exit_code: 1" in output
-
-    def test_format_exec_result_both_output(self) -> None:
-        """Test formatting an ExecResult with both stdout and stderr."""
-        result = ExecResult(stdout="Standard output", stderr="Standard error", exit_code=1)
-        output = format_tool_result(result)
-        assert "Standard output" in output
-        assert "Standard error" in output
-        assert "- exit_code: 1" in output
-
-    def test_format_search_result(self) -> None:
-        """Test formatting a SearchResult."""
-        items = [
-            SearchResultItem(title="Python", url="https://python.org", snippet="Python is great"),
-        ]
-        result = SearchResult(query="python language", results=items, result_count=1)
-        output = format_tool_result(result)
-        assert "Query: python language" in output
-        assert "Python" in output
-        assert "https://python.org" in output
-        assert "Python is great" in output
-        assert "Results (1, showing top 1):" in output
-
-    def test_format_search_result_no_results(self) -> None:
-        """Test formatting a SearchResult with no results."""
-        result = SearchResult(query="empty search", results=[], result_count=0)
-        output = format_tool_result(result)
-        assert "Query: empty search" in output
-        assert "Results (0, showing top 0):" in output
-
-    def test_format_tool_error(self) -> None:
-        """Test formatting a ToolError."""
-        result = ToolError(error="API key not found")
-        output = format_tool_result(result)
-        assert output == "- **Error:** API key not found"
-
-    def test_format_tool_error_empty(self) -> None:
-        """Test formatting an empty ToolError."""
-        result = ToolError(error="")
-        output = format_tool_result(result)
-        assert output == "- **Error:** "

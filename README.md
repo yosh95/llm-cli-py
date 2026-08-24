@@ -137,6 +137,13 @@ tokens are rendered live as they arrive.
 Tool calls are **always executed automatically** without prompting the user for
 confirmation. There is no manual/auto mode and no human-in-the-loop approval.
 
+## Tool Display
+
+When a tool runs, the CLI shows a single one-line indicator
+(`🔨 Executing tool: <name>...`). The tool's arguments and its result are **not**
+printed to the terminal; the result is only passed back to the LLM via
+conversation history.
+
 ## Development
 
 ```bash

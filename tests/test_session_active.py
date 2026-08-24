@@ -102,13 +102,13 @@ class TestProcessAndPrint:
 
         captured = capsys.readouterr()
         assert "The answer is 42" in captured.out
-        assert "Tool: calculate" in captured.out
+        assert "Executing tool: calculate" in captured.out
 
-    def test_web_search_result_shown_truncated(
+    def test_web_search_result_hidden_from_terminal(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Web search results are shown in the terminal, but truncated to a
-        single top result."""
+        """Web search results are not shown on the terminal (only the LLM
+        receives them via conversation history)."""
 
         def search_tool(query: str = "") -> SearchResult:  # noqa: ARG001
             return SearchResult(
@@ -137,13 +137,11 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Search python")])
 
         captured = capsys.readouterr()
-        # Tool call (arguments) is shown.
-        assert "Tool: web_search" in captured.out
-        assert "query: python" in captured.out
-        # Truncated result is shown: top result only.
-        assert "Tool Result:" in captured.out
-        assert "Top hit" in captured.out
+        # Only the execution line is shown; neither the arguments nor result.
+        assert "Executing tool: web_search" in captured.out
+        assert "Top hit" not in captured.out
         assert "Second hit" not in captured.out
+        assert "Tool Result:" not in captured.out
 
     def test_tool_not_found(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         tool_call = ToolCall(id="call_1", name="nonexistent_tool", arguments={})
@@ -258,7 +256,8 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Run it")])
 
         captured = capsys.readouterr()
-        assert "API limit exceeded" in captured.out
+        # The tool error is passed to the LLM via history, not shown on the terminal.
+        assert "API limit exceeded" not in captured.out
 
 
 class TestApprovalIntegration:
