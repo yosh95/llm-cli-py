@@ -137,3 +137,61 @@ class TestRunInteractive:
             run_interactive(session)
         captured = capsys.readouterr()
         assert "Use /quit to exit" in captured.out
+
+
+class TestChatLogSave:
+    """The interactive loop saves the conversation before exiting when a log file
+    is configured, and skips saving when it is not."""
+    def test_saves_on_eof_when_env_set(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import _dump_toml, run_interactive
+
+        log_file = tmp_path / "chat.log"
+        monkeypatch.setenv("LLM_CLI_CHAT_LOG_FILE", str(log_file))
+
+        session = _make_session()
+        session.client.state.conversation = [
+            Message(role=Role.USER, content="Hi there"),
+            Message(role=Role.ASSISTANT, content="Hello"),
+        ]
+
+        with patch("llm_cli_py.session.interactive.prompt", side_effect=EOFError()):
+            run_interactive(session)
+
+        assert log_file.exists()
+        assert log_file.read_text(encoding="utf-8") == _dump_toml(session)
+
+    def test_saves_on_quit_when_env_set(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import run_interactive
+
+        log_file = tmp_path / "chat.log"
+        monkeypatch.setenv("LLM_CLI_CHAT_LOG_FILE", str(log_file))
+
+        session = _make_session()
+        session.client.state.conversation = [Message(role=Role.USER, content="Bye")]
+
+        with patch("llm_cli_py.session.interactive.prompt", side_effect=["/quit"]):
+            run_interactive(session)
+
+        assert log_file.exists()
+        assert 'content = "Bye"' in log_file.read_text(encoding="utf-8")
+
+    def test_does_not_save_when_env_unset(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from llm_cli_py.session.interactive import run_interactive
+
+        monkeypatch.delenv("LLM_CLI_CHAT_LOG_FILE", raising=False)
+
+        session = _make_session()
+        session.client.state.conversation = [Message(role=Role.USER, content="Hi")]
+
+        candidate = tmp_path / "should_not_exist.log"
+
+        with patch("llm_cli_py.session.interactive.prompt", side_effect=EOFError()):
+            run_interactive(session)
+
+        assert not candidate.exists()

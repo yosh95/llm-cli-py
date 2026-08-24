@@ -25,3 +25,7 @@ Thumbs.db
 # Tool caches
 .pytest_cache/
 .ruff_cache/
+
+# Local session log / prompt history
+.llm_cli_chat_log
+.llm_cli_prompt_history

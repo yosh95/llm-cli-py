@@ -1,7 +1,4 @@
 """Constants for llm-cli-py."""
-
-from pathlib import Path
-
 # ── Timeout constants (seconds) ────────────────────────────────────
 
 DEFAULT_REQUEST_TIMEOUT: int = 300
@@ -47,8 +44,19 @@ BRAVE_SEARCH_MAX_RETRIES: int = 3
 """Maximum number of retries for Brave Search API requests."""
 
 
-# ── Prompt history ────────────────────────────────────────────────
+# ── Prompt history / chat log ─────────────────────────────────
 
 
-PROMPT_HISTORY_FILE = Path("~/.llm_cli_py_history").expanduser()
-"""File that persists the interactive prompt input history (a single hidden file in $HOME)."""
+ENV_PROMPT_HISTORY_FILE = "LLM_CLI_PROMPT_HISTORY_FILE"
+"""Environment variable for the prompt history file.
+
+When set, the interactive prompt history is persisted to this file across
+invocations. When unset, history is kept only in memory for the current run.
+"""
+
+ENV_CHAT_LOG_FILE = "LLM_CLI_CHAT_LOG_FILE"
+"""Environment variable for the session (chat) log file.
+
+When set, the full conversation (same content as ``/dump``) is written to this
+file when the interactive session ends. When unset, nothing is saved.
+"""

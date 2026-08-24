@@ -40,6 +40,8 @@ llm-cli-py -m gpt-4o
 | `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
+| `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |
+| `LLM_CLI_CHAT_LOG_FILE` | Path to write the full conversation (same content as `/dump`) when an interactive session ends. If unset, the conversation is not saved to disk. |
 
 ## Usage
 
@@ -109,6 +111,14 @@ completion, and multiline editing. The `PromptSession` is created exactly once
 and used by the main chat loop, so
 prompt_toolkit's terminal handling (raw mode, alternate screen buffer, its own
 event loop) is initialized only once and never conflicts with itself.
+
+- **Prompt history** — When `LLM_CLI_PROMPT_HISTORY_FILE` is set, your prompt
+  input history is persisted to that file across invocations. If it is unset,
+  history lives only in memory for the current run.
+- **Session log** — When `LLM_CLI_CHAT_LOG_FILE` is set, the full conversation
+  (the same content as the `/dump` command) is written to that file when the
+  interactive session ends (via `/quit`, Ctrl+D, or otherwise). If it is unset,
+  nothing is saved.
 
 ## Streaming
 

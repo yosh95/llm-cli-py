@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 import tomli_w
 
 from .. import ui
+from ..consts import ENV_CHAT_LOG_FILE
 from ..models import DataSource
 from .prompt import prompt
 from .session import ActiveSession
@@ -54,7 +56,8 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     return None
 
 
-def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
+def _dump_toml(session: ActiveSession) -> str:
+    """Render the conversation history as TOML (same content as ``/dump``)."""
     data: dict[str, object] = {
         "message": [
             {
@@ -64,7 +67,27 @@ def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
             for m in session.client.state.conversation
         ]
     }
-    print(tomli_w.dumps(data).replace("\\n", "\n"))
+    return tomli_w.dumps(data).replace("\\n", "\n")
+
+
+def _save_chat_log(session: ActiveSession) -> None:
+    """Persist the session conversation to the configured chat log file.
+
+    The content is identical to ``/dump``. If LLM_CLI_CHAT_LOG_FILE is unset,
+    nothing is saved.
+    """
+    log_path = os.environ.get(ENV_CHAT_LOG_FILE, "").strip()
+    if not log_path:
+        return
+    try:
+        with open(log_path, "w", encoding="utf-8") as fh:
+            fh.write(_dump_toml(session))
+    except OSError as e:
+        ui.display.report_warning(f"Failed to save chat log to '{log_path}': {e}")
+
+
+def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
+    print(_dump_toml(session))
     return None
 
 
@@ -99,32 +122,37 @@ def run_interactive(
     if initial_sources:
         session.process_and_print(initial_sources)
 
-    while True:
-        try:
-            ui.display.print_rule()
-            prompt_text = _get_prompt_text()
-            user_input = prompt(prompt_text)
+    try:
+        while True:
+            try:
+                ui.display.print_rule()
+                prompt_text = _get_prompt_text()
+                user_input = prompt(prompt_text)
 
-            if not user_input.strip():
+                if not user_input.strip():
+                    continue
+
+                if user_input.startswith("/"):
+                    handled = _handle_slash_command(session, user_input)
+                    if handled == "exit":
+                        break
+                    continue
+
+                _handle_user_input(session, user_input)
+
+            except KeyboardInterrupt:
+                ui.display.report_info("Use /quit to exit, or press Ctrl+D.")
                 continue
-
-            if user_input.startswith("/"):
-                handled = _handle_slash_command(session, user_input)
-                if handled == "exit":
-                    break
+            except EOFError:
+                break
+            except Exception as e:
+                ui.display.report_error(f"Unexpected error: {e}")
+                ui.display.report_info("The session continues. You can try again.")
                 continue
-
-            _handle_user_input(session, user_input)
-
-        except KeyboardInterrupt:
-            ui.display.report_info("Use /quit to exit, or press Ctrl+D.")
-            continue
-        except EOFError:
-            break
-        except Exception as e:
-            ui.display.report_error(f"Unexpected error: {e}")
-            ui.display.report_info("The session continues. You can try again.")
-            continue
+    finally:
+        # Save the conversation when the session ends (EOF, /quit, Ctrl+C halt,
+        # or an unexpected error), if a log file is configured via env.
+        _save_chat_log(session)
 
 
 def _handle_slash_command(session: ActiveSession, input_str: str) -> str:
