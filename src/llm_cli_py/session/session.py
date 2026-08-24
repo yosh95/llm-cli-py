@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from pathlib import Path
-
-import tomli_w
 
 from .. import ui
 from ..base import LlmClient
@@ -33,16 +30,10 @@ class ActiveSession:
         self,
         client: LlmClient,
         ctx: SessionContext,
-        log_file: str | Path | None = None,
     ) -> None:
         self.client = client
         self.ctx = ctx
         self.trace_id = str(uuid.uuid4())
-        # Optional file that receives the LLM conversation history (+ tool
-        # call logs) in the same TOML format as /dump.
-        # It is overwritten at the end of every turn and every React-loop
-        # iteration so that progress survives an abnormal exit.
-        self._log_file = Path(log_file).expanduser() if log_file else None
 
     def process_and_print(self, data: list[DataSource]) -> None:
         """Main processing loop: send to LLM, handle tool calls, display results."""
@@ -72,7 +63,6 @@ class ActiveSession:
             current_data = []
 
             self._finalize_streamed(stream_state, response)
-            self._write_log()  # capture this React-loop turn
 
             if not response.tool_calls:
                 break
@@ -87,11 +77,9 @@ class ActiveSession:
                     "was NOT executed. Please try again."
                 )
                 self._drop_broken_tool_calls_from_history(response.tool_calls)
-                self._write_log()
                 break
 
             self._handle_tool_calls(response.tool_calls)
-            self._write_log()  # tool results now recorded
             current_data = []
 
     def _send_streamed(
@@ -145,34 +133,6 @@ class ActiveSession:
             if not msg.tool_calls:
                 msg.tool_calls = None
             break
-
-    def _write_log(self) -> None:
-        """Write the current conversation history to the log file.
-
-        Produces the same TOML content as the ``/dump`` command (role/content).
-        The whole file is overwritten on every call so that, in case of an
-        abnormal exit at any point, the most recent state is on disk. Writes
-        are best-effort: a failure is reported but does not stop the session.
-        """
-        if not self._log_file:
-            return
-        data: dict[str, object] = {
-            "message": [
-                {
-                    "role": m.role.value,
-                    "content": m.content,
-                }
-                for m in self.client.state.conversation
-            ]
-        }
-        try:
-            self._log_file.parent.mkdir(parents=True, exist_ok=True)
-            self._log_file.write_text(
-                tomli_w.dumps(data).replace("\\n", "\n"),
-                encoding="utf-8",
-            )
-        except Exception as e:  # pragma: no cover - defensive
-            ui.display.report_warning(f"Failed to write log file '{self._log_file}': {e}")
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""

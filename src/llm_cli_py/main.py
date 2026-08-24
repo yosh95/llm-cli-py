@@ -67,17 +67,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--api-key",
         help=f"API key. Overrides {ENV_API_KEY} env var.",
     )
-    parser.add_argument(
-        "-l",
-        "--log-file",
-        help=(
-            "Write the LLM conversation history and tool-call log to PATH in the "
-            "same TOML format as /dump (reasoning excluded). The file is "
-            "overwritten after every turn and every React-loop iteration so "
-            "progress survives an abnormal exit. No file is written unless this "
-            "option is given."
-        ),
-    )
     # Subcommands
     subparsers = parser.add_subparsers(dest="command")
 
@@ -181,7 +170,7 @@ def main() -> None:
         ctx = SessionContext(
             tool_registry=tool_registry,
         )
-        session = ActiveSession(client, ctx, log_file=args.log_file)
+        session = ActiveSession(client, ctx)
 
         initial_sources: list[DataSource] = []
         for src in args.sources:
