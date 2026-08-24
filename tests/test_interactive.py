@@ -142,6 +142,7 @@ class TestRunInteractive:
 class TestChatLogSave:
     """The interactive loop saves the conversation before exiting when a log file
     is configured, and skips saving when it is not."""
+
     def test_saves_on_eof_when_env_set(self, tmp_path, monkeypatch) -> None:
         from unittest.mock import patch
 
