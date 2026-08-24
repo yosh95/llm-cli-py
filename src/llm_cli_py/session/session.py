@@ -134,11 +134,44 @@ class ActiveSession:
                 msg.tool_calls = None
             break
 
+    @staticmethod
+    def _format_tool_arguments(tool_name: str, arguments: dict[str, object]) -> str | None:
+        """Format tool-call parameters for terminal display.
+
+        Only ``web_search`` and ``execute_python`` show their parameters:
+
+        - ``web_search``: all parameters (the query) are displayed in full.
+        - ``execute_python``: a portion of the ``code`` parameter (~250 chars)
+          is displayed so the user can see what is being run without flooding
+          the terminal.
+
+        Other tools keep the previous behavior (no parameters shown).
+        """
+        if tool_name == "web_search":
+            parts = [f"{key}={value}" for key, value in arguments.items()]
+            return ", ".join(parts) if parts else None
+
+        if tool_name == "execute_python":
+            code = arguments.get("code")
+            if code is None:
+                return None
+            code_str = str(code)
+            limit = 250
+            if len(code_str) > limit:
+                return code_str[:limit] + " ..."
+            return code_str
+
+        return None
+
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
+
+            args_display = self._format_tool_arguments(tc.name, tc.arguments)
+            if args_display:
+                ui.display.print_info("Args", args_display)
 
             tool = self.ctx.tool_registry.get(tc.name)
             if not tool:

@@ -133,10 +133,16 @@ confirmation. There is no manual/auto mode and no human-in-the-loop approval.
 
 ## Tool Display
 
-When a tool runs, the CLI shows a single one-line indicator
-(`🔨 Executing tool: <name>...`). The tool's arguments and its result are **not**
-printed to the terminal; the result is only passed back to the LLM via
-conversation history.
+When a tool runs, the CLI shows a one-line indicator
+(`🔨 Executing tool: <name>...`). Parameters are shown for the two built-in
+tools, while the result is **not** printed to the terminal (it is only passed
+back to the LLM via conversation history):
+
+- **`web_search`** — all parameters (the search query) are shown in full.
+- **`execute_python`** — a portion of the `code` parameter (~250 characters)
+  is shown so you can see what is being run without flooding the terminal.
+
+Other tools keep the previous behavior (no parameters shown).
 
 ## Development
 

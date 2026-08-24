@@ -137,8 +137,9 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Search python")])
 
         captured = capsys.readouterr()
-        # Only the execution line is shown; neither the arguments nor result.
+        # Execution line plus the full query are shown; the result is not.
         assert "Executing tool: web_search" in captured.out
+        assert "query=python" in captured.out
         assert "Top hit" not in captured.out
         assert "Second hit" not in captured.out
         assert "Tool Result:" not in captured.out
@@ -294,3 +295,64 @@ class TestApprovalIntegration:
         assert "Executing tool: safe_tool" in captured.out
         # No approval prompt is shown.
         assert "Approve tool call" not in captured.out
+
+
+class TestToolArgumentDisplay:
+    """Terminal display of tool-call parameters (args) per tool."""
+
+    def test_web_search_shows_all_arguments(self, session: ActiveSession) -> None:
+        rendered = session._format_tool_arguments(
+            "web_search",
+            {"query": "python 3.13 release", "extra": "x"},
+        )
+        assert rendered == "query=python 3.13 release, extra=x"
+
+    def test_web_search_no_arguments_returns_none(self, session: ActiveSession) -> None:
+        assert session._format_tool_arguments("web_search", {}) is None
+
+    def test_execute_python_shows_code_within_limit(self, session: ActiveSession) -> None:
+        code = "print('hi')"
+        rendered = session._format_tool_arguments("execute_python", {"code": code})
+        assert rendered == code
+
+    def test_execute_python_truncates_long_code(self, session: ActiveSession) -> None:
+        code = "x = 1\n" * 200  # 1200 chars
+        rendered = session._format_tool_arguments("execute_python", {"code": code})
+        assert rendered is not None
+        assert rendered.endswith(" ...")
+        body = rendered[: -len(" ...")]
+        assert len(body) == 250
+        assert code.startswith(body)
+
+    def test_execute_python_missing_code_returns_none(self, session: ActiveSession) -> None:
+        assert session._format_tool_arguments("execute_python", {}) is None
+
+    def test_other_tools_show_no_arguments(self, session: ActiveSession) -> None:
+        assert session._format_tool_arguments("some_other_tool", {"a": 1}) is None
+
+    def test_execute_python_args_printed_in_terminal(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def py_tool(code: str = "") -> ExecResult:  # noqa: ARG001
+            return ExecResult(stdout="ok")
+
+        session.ctx.tool_registry.register(
+            "execute_python",
+            "Runs python",
+            {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
+            py_tool,
+        )
+
+        tool_call = ToolCall(id="call_1", name="execute_python", arguments={"code": "print(1)"})
+        responses = [
+            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
+            LlmResponse(text="Done", tool_calls=[]),
+        ]
+        with patch.object(session.client, "send", side_effect=responses):
+            session.process_and_print([DataSource(text="Run code")])
+
+        captured = capsys.readouterr()
+        assert "Executing tool: execute_python" in captured.out
+        assert "print(1)" in captured.out
+        # Result is still hidden from the terminal.
+        assert "ok" not in captured.out
