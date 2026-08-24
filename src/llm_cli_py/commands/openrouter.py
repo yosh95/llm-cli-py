@@ -21,7 +21,7 @@ OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 """OpenRouter API base URL."""
 
 # Command aliases for the openrouter subcommand.
-OPENROUTER_ALIASES = ["or", "opr", "ort"]
+OPENROUTER_ALIASES = ["o"]
 """Short aliases for the `openrouter` subcommand name."""
 
 # Short aliases for the openrouter sub-subcommands.
