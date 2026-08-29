@@ -104,11 +104,10 @@ class TestProcessAndPrint:
         assert "The answer is 42" in captured.out
         assert "Executing tool: calculate" in captured.out
 
-    def test_web_search_result_hidden_from_terminal(
+    def test_web_search_result_shown_on_terminal(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Web search results are not shown on the terminal (only the LLM
-        receives them via conversation history)."""
+        """Web search tool call parameters and results are displayed on the terminal."""
 
         def search_tool(query: str = "") -> SearchResult:  # noqa: ARG001
             return SearchResult(
@@ -137,12 +136,14 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Search python")])
 
         captured = capsys.readouterr()
-        # Execution line plus the full query are shown; the result is not.
+        # Execution line plus the full query are shown.
         assert "Executing tool: web_search" in captured.out
         assert "query=python" in captured.out
-        assert "Top hit" not in captured.out
-        assert "Second hit" not in captured.out
-        assert "Tool Result:" not in captured.out
+        # Results are now displayed on the terminal.
+        assert "Top hit" in captured.out
+        assert "Second hit" in captured.out
+        assert "Tool Result:" in captured.out
+        assert "Found 2 result(s)" in captured.out
 
     def test_tool_not_found(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         tool_call = ToolCall(id="call_1", name="nonexistent_tool", arguments={})
@@ -257,8 +258,8 @@ class TestProcessAndPrint:
             session.process_and_print([DataSource(text="Run it")])
 
         captured = capsys.readouterr()
-        # The tool error is passed to the LLM via history, not shown on the terminal.
-        assert "API limit exceeded" not in captured.out
+        # Tool error is displayed on the terminal.
+        assert "API limit exceeded" in captured.out
 
 
 class TestApprovalIntegration:
@@ -315,20 +316,22 @@ class TestToolArgumentDisplay:
         rendered = session._format_tool_arguments("execute_python", {"code": code})
         assert rendered == code
 
-    def test_execute_python_truncates_long_code(self, session: ActiveSession) -> None:
+    def test_execute_python_shows_full_code(self, session: ActiveSession) -> None:
         code = "x = 1\n" * 200  # 1200 chars
         rendered = session._format_tool_arguments("execute_python", {"code": code})
         assert rendered is not None
-        assert rendered.endswith(" ...")
-        body = rendered[: -len(" ...")]
-        assert len(body) == 250
-        assert code.startswith(body)
+        # Full code is now returned (no truncation)
+        assert rendered == code
 
     def test_execute_python_missing_code_returns_none(self, session: ActiveSession) -> None:
         assert session._format_tool_arguments("execute_python", {}) is None
 
-    def test_other_tools_show_no_arguments(self, session: ActiveSession) -> None:
-        assert session._format_tool_arguments("some_other_tool", {"a": 1}) is None
+    def test_other_tools_show_all_arguments(self, session: ActiveSession) -> None:
+        result = session._format_tool_arguments("some_other_tool", {"a": 1})
+        assert result == "a=1"
+
+    def test_unknown_tool_with_no_args_returns_none(self, session: ActiveSession) -> None:
+        assert session._format_tool_arguments("unknown_tool", {}) is None
 
     def test_execute_python_args_printed_in_terminal(
         self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
@@ -354,5 +357,6 @@ class TestToolArgumentDisplay:
         captured = capsys.readouterr()
         assert "Executing tool: execute_python" in captured.out
         assert "print(1)" in captured.out
-        # Result is still hidden from the terminal.
-        assert "ok" not in captured.out
+        # Result is now shown on the terminal.
+        assert "ok" in captured.out
+        assert "Exit code: 0" in captured.out

@@ -138,30 +138,72 @@ class ActiveSession:
     def _format_tool_arguments(tool_name: str, arguments: dict[str, object]) -> str | None:
         """Format tool-call parameters for terminal display.
 
-        Only ``web_search`` and ``execute_python`` show their parameters:
+        All parameters for every tool are displayed in full.
 
-        - ``web_search``: all parameters (the query) are displayed in full.
-        - ``execute_python``: a portion of the ``code`` parameter (~250 chars)
-          is displayed so the user can see what is being run without flooding
-          the terminal.
-
-        Other tools keep the previous behavior (no parameters shown).
+        - ``execute_python``: the ``code`` parameter is returned as-is
+          (with embedded newlines preserved) so it can be rendered as
+          a code block by the caller.
+        - Other tools: all key=value pairs are shown inline.
         """
-        if tool_name == "web_search":
-            parts = [f"{key}={value}" for key, value in arguments.items()]
-            return ", ".join(parts) if parts else None
+        if not arguments:
+            return None
 
         if tool_name == "execute_python":
             code = arguments.get("code")
-            if code is None:
-                return None
-            code_str = str(code)
-            limit = 250
-            if len(code_str) > limit:
-                return code_str[:limit] + " ..."
-            return code_str
+            return str(code) if code is not None else None
 
-        return None
+        parts = [f"{key}={value}" for key, value in arguments.items()]
+        return ", ".join(parts) if parts else None
+
+    @staticmethod
+    def _format_tool_result(content_str: str) -> list[str]:
+        """Format tool execution result for terminal display.
+
+        Parses the JSON result and returns a list of display lines.
+        """
+        if not content_str:
+            return ["(empty result)"]
+
+        try:
+            data = json.loads(content_str)
+        except json.JSONDecodeError:
+            return [content_str]
+
+        lines: list[str] = []
+
+        if "error" in data and "stdout" not in data and "results" not in data:
+            # ToolError
+            lines.append(f"Error: {data['error']}")
+        elif "stdout" in data:
+            # ExecResult
+            ec = data.get("exit_code", 0)
+            lines.append(f"Exit code: {ec}")
+            stdout = str(data.get("stdout", ""))
+            if stdout.strip():
+                lines.append("[stdout]")
+                for line in stdout.rstrip().splitlines():
+                    lines.append(f"  {line}")
+            stderr_val = str(data.get("stderr", ""))
+            if stderr_val.strip():
+                lines.append("[stderr]")
+                for line in stderr_val.rstrip().splitlines():
+                    lines.append(f"  {line}")
+        elif "results" in data:
+            # SearchResult
+            count = data.get("result_count", 0)
+            query = data.get("query", "")
+            lines.append(f"Found {count} result(s) for: {query}")
+            for i, r in enumerate(data.get("results", []), 1):
+                lines.append(f"  {i}. {r.get('title', '')}")
+                lines.append(f"     {r.get('url', '')}")
+                snippet = r.get("snippet", "")
+                if snippet:
+                    snip_display = snippet[:150] + "..." if len(snippet) > 150 else snippet
+                    lines.append(f"     {snip_display}")
+        else:
+            lines.append(content_str)
+
+        return lines
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
@@ -171,7 +213,10 @@ class ActiveSession:
 
             args_display = self._format_tool_arguments(tc.name, tc.arguments)
             if args_display:
-                ui.display.print_info("Args", args_display)
+                if tc.name == "execute_python":
+                    ui.display.print_code_block(args_display)
+                else:
+                    ui.display.print_info("Args", args_display)
 
             tool = self.ctx.tool_registry.get(tc.name)
             if not tool:
@@ -194,6 +239,10 @@ class ActiveSession:
                     content_str = json.dumps(result.to_dict(), ensure_ascii=False)
                 else:
                     content_str = json.dumps(result, ensure_ascii=False) if result is not None else ""
+
+                # Display the tool execution result
+                result_lines = self._format_tool_result(content_str)
+                ui.display.print_tool_result(result_lines)
 
                 self.client.state.conversation.append(
                     Message(

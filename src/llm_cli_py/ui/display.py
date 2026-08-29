@@ -47,6 +47,30 @@ def stream_end() -> None:
     print("", flush=True)
 
 
+def print_code_block(code: str) -> None:
+    """Print Python code with preserved formatting.
+
+    The code is displayed as-is (with proper newlines) so it is
+    easy to read and copy-paste.
+    """
+    if not code.strip():
+        return
+    print("  Code:")
+    for line in code.rstrip().splitlines():
+        print(f"    {line}")
+
+
+def print_tool_result(lines: list[str]) -> None:
+    """Print the result of a tool execution.
+
+    Each line in the list is printed with an indent for visual
+    separation from the surrounding output.
+    """
+    print("  Tool Result:")
+    for line in lines:
+        print(f"    {line}")
+
+
 def print_info(label: str, value: str) -> None:
     """Print an info key-value pair."""
     print(f"  {label}: {value}")
