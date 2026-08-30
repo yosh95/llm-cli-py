@@ -32,7 +32,22 @@ def _make_stream_response(chunks: list[str]) -> MagicMock:
 class TestLlmApiClient:
     """Test the OpenAI-compatible chat API client."""
 
-    def test_build_messages_with_default_system_prompt(self) -> None:
+    def test_build_messages_omits_system_prompt_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://api.example.com/v1",
+            api_key="key",
+        )
+        client._state.conversation = [Message(role=Role.USER, content="Hello")]
+        messages = client._build_messages()
+
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "Hello"
+
+    def test_build_messages_uses_system_prompt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SYSTEM_PROMPT", "You are a test assistant.")
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
@@ -42,20 +57,22 @@ class TestLlmApiClient:
         messages = client._build_messages()
 
         assert messages[0]["role"] == "system"
-        assert "Today's actual date is:" in messages[0]["content"]
+        assert messages[0]["content"] == "You are a test assistant."
         assert messages[1]["role"] == "user"
         assert messages[1]["content"] == "Hello"
 
-    def test_build_messages_respects_system_prompt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SYSTEM_PROMPT", "You are a test assistant.")
+    def test_build_messages_omits_system_prompt_when_env_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SYSTEM_PROMPT", "")
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
             api_key="key",
         )
+        client._state.conversation = [Message(role=Role.USER, content="Hello")]
         messages = client._build_messages()
 
-        assert messages[0]["content"] == "You are a test assistant."
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_build_request_with_tools(self) -> None:
         client = LlmApiClient(

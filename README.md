@@ -37,7 +37,7 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for the `web_search` tool). |
 | `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
-| `SYSTEM_PROMPT` | Custom system prompt. When unset, a default prompt with today's date is used. |
+| `SYSTEM_PROMPT` | System prompt to send with every request. When unset or empty, no system prompt is sent (no default/date prompt is injected). |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |

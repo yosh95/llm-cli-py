@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from datetime import date
 from typing import Any
 
 import requests
@@ -16,25 +15,13 @@ from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchem
 from ..utils.http import post_with_retries
 
 
-def _get_default_system_prompt() -> str:
-    """Generate the default system prompt with today's actual date injected."""
-    today = date.today()
-    return (
-        f"Today's actual date is: {today.isoformat()}. "
-        "When the user asks for current information, use today's date as reference."
-    )
-
-
 def _get_system_prompt() -> str:
     """Return the system prompt for every request.
 
-    Uses the ``SYSTEM_PROMPT`` environment variable if set,
-    otherwise generates a default prompt with today's date.
+    Reads the ``SYSTEM_PROMPT`` environment variable. When unset, no system
+    prompt is sent (no default/date prompt is injected).
     """
-    env_prompt = os.environ.get("SYSTEM_PROMPT")
-    if env_prompt is not None:
-        return env_prompt
-    return _get_default_system_prompt()
+    return os.environ.get("SYSTEM_PROMPT", "")
 
 
 class LlmApiClient(LlmClient):
@@ -86,7 +73,8 @@ class LlmApiClient(LlmClient):
         messages: list[dict[str, Any]] = []
 
         sys_prompt = _get_system_prompt()
-        messages.append({"role": "system", "content": sys_prompt})
+        if sys_prompt:
+            messages.append({"role": "system", "content": sys_prompt})
 
         for msg in self._state.conversation:
             entry: dict[str, Any] = {"role": msg.role.value}
