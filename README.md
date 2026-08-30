@@ -144,15 +144,20 @@ confirmation. There is no manual/auto mode and no human-in-the-loop approval.
 ## Tool Display
 
 When a tool runs, the CLI shows a one-line indicator
-(`🔨 Executing tool: <name>...`). Parameters are shown for the two built-in
-tools, while the result is **not** printed to the terminal (it is only passed
-back to the LLM via conversation history):
+(`🔨 Executing tool: <name>...`), the tool parameters, then the tool result.
+A horizontal rule (`─`) is drawn before the result block so the tool call and
+its result are easy to tell apart:
 
-- **`web_search`** — all parameters (the search query) are shown in full.
-- **`execute_python`** — a portion of the `code` parameter (~250 characters)
-  is shown so you can see what is being run without flooding the terminal.
+- **Call** — `🔨 Executing tool: <name>...` followed by parameters.
+- **Result** — a `───` rule, then the `Tool Result:` block.
 
-Other tools keep the previous behavior (no parameters shown).
+Parameter and result display per tool:
+
+- **`web_search`** — all parameters (the search query) are shown in full; the
+  returned hits (title, URL, snippet) are printed in the result block.
+- **`execute_python`** — the full `code` parameter is shown, and the result
+  block includes the exit code plus stdout/stderr.
+- Other tools show no parameters by default (result block still printed).
 
 ## Development
 

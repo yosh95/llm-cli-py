@@ -63,9 +63,12 @@ def print_code_block(code: str) -> None:
 def print_tool_result(lines: list[str]) -> None:
     """Print the result of a tool execution.
 
-    Each line in the list is printed with an indent for visual
+    A horizontal rule is drawn first so the result block is clearly
+    separated from the tool invocation (``Executing tool: ...``) above
+    it. Each line in the list is printed with an indent for visual
     separation from the surrounding output.
     """
+    print_rule()
     print("  Tool Result:")
     for line in lines:
         print(f"    {line}")
