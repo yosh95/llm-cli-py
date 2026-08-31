@@ -29,8 +29,7 @@ from .session.session import ActiveSession, SessionContext
 from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
 from .tools.registry import ToolRegistry
 from .tools.web_search import (
-    OPENROUTER_WEB_SEARCH_DESCRIPTION,
-    OPENROUTER_WEB_SEARCH_SCHEMA,
+    OPENROUTER_WEB_SEARCH_PARAMETERS,
     OPENROUTER_WEB_SEARCH_TOOL_NAME,
 )
 from .ui import display as ui_display
@@ -103,8 +102,8 @@ def initialize_tools(api_url: str | None = None) -> ToolRegistry:
     if api_url and "openrouter.ai" in api_url:
         registry.register(
             OPENROUTER_WEB_SEARCH_TOOL_NAME,
-            OPENROUTER_WEB_SEARCH_DESCRIPTION,
-            OPENROUTER_WEB_SEARCH_SCHEMA,
+            "",  # description is not sent for server tools; provider applies its own.
+            OPENROUTER_WEB_SEARCH_PARAMETERS,
             None,  # provider-executed server tool
             server_tool=True,
         )

@@ -114,13 +114,15 @@ class LlmApiClient(LlmClient):
             for ts in tool_schemas:
                 if ts.server_tool:
                     # Provider-executed server tool (e.g. openrouter:web_search):
-                    # advertised verbatim, executed by the provider server-side.
-                    tools.append(
-                        {
-                            "type": ts.name,
-                            **({"parameters": ts.parameters} if ts.parameters else {}),
-                        }
-                    )
+                    # executed by the provider server-side. Sent in its minimal
+                    # form (``{"type": "openrouter:web_search"}``) so no
+                    # function wrapper or JSON schema is sent; the provider
+                    # applies its own defaults. Optional parameters are only
+                    # attached when configured.
+                    server_tool_entry = {"type": ts.name}
+                    if ts.parameters:
+                        server_tool_entry["parameters"] = ts.parameters
+                    tools.append(server_tool_entry)
                 else:
                     tools.append(
                         {

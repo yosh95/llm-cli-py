@@ -18,8 +18,7 @@ from llm_cli_py.models import DataSource, LlmResponse, ToolCall, ToolSchema
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.web_search import (
-    OPENROUTER_WEB_SEARCH_DESCRIPTION,
-    OPENROUTER_WEB_SEARCH_SCHEMA,
+    OPENROUTER_WEB_SEARCH_PARAMETERS,
     OPENROUTER_WEB_SEARCH_TOOL_NAME,
 )
 
@@ -30,15 +29,9 @@ class TestWebSearchToolDefinition:
     def test_tool_name(self) -> None:
         assert OPENROUTER_WEB_SEARCH_TOOL_NAME == "openrouter:web_search"
 
-    def test_schema_has_query_required(self) -> None:
-        assert OPENROUTER_WEB_SEARCH_SCHEMA["type"] == "object"
-        assert "query" in OPENROUTER_WEB_SEARCH_SCHEMA["required"]  # type: ignore[operator]
-        props = OPENROUTER_WEB_SEARCH_SCHEMA["properties"]
-        assert isinstance(props, dict)
-        assert props["query"]["type"] == "string"
-
-    def test_description_nonempty(self) -> None:
-        assert OPENROUTER_WEB_SEARCH_DESCRIPTION
+    def test_no_parameters_by_default(self) -> None:
+        """The tool is sent in its minimal form: no parameters are attached."""
+        assert OPENROUTER_WEB_SEARCH_PARAMETERS == {}
 
 
 class TestInitializeTools:
@@ -81,27 +74,42 @@ class TestRequestBuilding:
             api_key="key",
         )
 
-    def test_server_tool_emitted_verbatim(self) -> None:
+    def test_server_tool_emitted_in_minimal_form(self) -> None:
+        """Server tools are sent as {"type": "openrouter:web_search"} - no
+        ``function`` wrapper, no ``parameters``, no JSON schema."""
         client = self._client()
         server_schema = ToolSchema(
             name="openrouter:web_search",
-            description="Search the web",
-            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+            description="",  # description is not sent for server tools
+            parameters={},  # minimal: no parameters attached by default
             server_tool=True,
         )
         body = client._build_request([{"role": "user", "content": "hi"}], [server_schema])
         tools = body["tools"]
         assert len(tools) == 1
-        assert tools[0]["type"] == "openrouter:web_search"
+        assert tools[0] == {"type": "openrouter:web_search"}
         assert "function" not in tools[0]
-        assert tools[0]["parameters"]["properties"]["query"]["type"] == "string"
+        assert "parameters" not in tools[0]
+
+    def test_server_tool_emits_parameters_when_configured(self) -> None:
+        """When parameters are configured, they are attached as ``parameters``."""
+        client = self._client()
+        server_schema = ToolSchema(
+            name="openrouter:web_search",
+            description="",
+            parameters={"max_results": 3},
+            server_tool=True,
+        )
+        body = client._build_request([{"role": "user", "content": "hi"}], [server_schema])
+        tools = body["tools"]
+        assert tools[0] == {"type": "openrouter:web_search", "parameters": {"max_results": 3}}
 
     def test_mixed_server_and_user_tools(self) -> None:
         client = self._client()
         server_schema = ToolSchema(
             name="openrouter:web_search",
-            description="Search",
-            parameters={"type": "object", "properties": {}},
+            description="",
+            parameters={},
             server_tool=True,
         )
         user_schema = ToolSchema(
@@ -113,6 +121,7 @@ class TestRequestBuilding:
         tools = body["tools"]
         by_type = {t["type"]: t for t in tools}
         assert "openrouter:web_search" in by_type
+        assert by_type["openrouter:web_search"] == {"type": "openrouter:web_search"}
         assert "function" in by_type
         assert by_type["function"]["function"]["name"] == "execute_python"
 

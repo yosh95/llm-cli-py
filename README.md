@@ -76,9 +76,11 @@ export LLM_CLI_MODEL="openai/gpt-5.2"   # any OpenRouter model works
 llm-cli-py "What are the latest AI news?"
 ```
 
-The tool is advertised with sensible defaults (`engine: auto`, `max_results: 5`).
-You can tune it via the `OPENROUTER_WEB_SEARCH_*` constants in
-`llm_cli_py/tools/web_search.py`.
+The tool is sent in its minimal form (`{"type": "openrouter:web_search"}`) and the
+provider applies sensible defaults (`engine: auto`, `max_results: 5`). To tune
+behaviour (e.g. `engine`, `max_results`, `max_uses`), add keys to
+`OPENROUTER_WEB_SEARCH_PARAMETERS` in `llm_cli_py/tools/web_search.py`;
+they are attached as the tool's `parameters` in the request.
 
 ### OpenRouter Subcommand
 

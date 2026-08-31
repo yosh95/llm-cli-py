@@ -17,7 +17,8 @@ class Tool:
         server_tool: When True, the tool is executed by the provider
             (e.g. OpenRouter server tools such as ``openrouter:web_search``)
             instead of by this application. ``func`` is None in that case and
-            the schema is emitted verbatim (``{"type": "openrouter:web_search"}``).
+            the tool is emitted in its minimal form
+            (``{"type": "openrouter:web_search"}``).
     """
 
     def __init__(
