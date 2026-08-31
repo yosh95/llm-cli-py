@@ -110,31 +110,17 @@ class LlmApiClient(LlmClient):
         }
 
         if tool_schemas:
-            tools = []
-            for ts in tool_schemas:
-                if ts.server_tool:
-                    # Provider-executed server tool (e.g. openrouter:web_search):
-                    # executed by the provider server-side. Sent in its minimal
-                    # form (``{"type": "openrouter:web_search"}``) so no
-                    # function wrapper or JSON schema is sent; the provider
-                    # applies its own defaults. Optional parameters are only
-                    # attached when configured.
-                    server_tool_entry = {"type": ts.name}
-                    if ts.parameters:
-                        server_tool_entry["parameters"] = ts.parameters
-                    tools.append(server_tool_entry)
-                else:
-                    tools.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": ts.name,
-                                "description": ts.description,
-                                "parameters": ts.parameters,
-                            },
-                        }
-                    )
-            body["tools"] = tools
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": ts.name,
+                        "description": ts.description,
+                        "parameters": ts.parameters,
+                    },
+                }
+                for ts in tool_schemas
+            ]
 
         return body
 
@@ -203,9 +189,8 @@ class LlmApiClient(LlmClient):
                 continue
 
             if delta.get("finish_reason"):
-                # Keep the raw finish_reason: "tool_calls" (user-defined tools)
-                # and "server_tool_calls" (OpenRouter server tools) both mean
-                # "the model asked for a tool and the loop must continue".
+                # Keep the raw finish_reason ("tool_calls" means the model
+                # asked for a tool and the loop must continue).
                 finish_reason = delta["finish_reason"]
 
             content = delta.get("content")

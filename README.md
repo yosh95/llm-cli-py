@@ -6,9 +6,8 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 
 ## Features
 
-- **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, Anthropic via OpenRouter, local instances, etc.)
+- **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, local instances, etc.)
 - **Python Execution** — Built-in `execute_python` tool for running Python code
-- **OpenRouter Web Search** — When the API URL points at OpenRouter, the `openrouter:web_search` server tool is enabled automatically (provider-executed, real-time web search for any model)
 - **Interactive Session** — Persistent chat with history and slash commands
 - **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
 - **Markdown Rendering** — CJK-friendly Markdown output with Rich
@@ -35,7 +34,6 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
-| `OPENROUTER_API_KEY` | OpenRouter API key (required for the `openrouter` subcommand). |
 | `SYSTEM_PROMPT` | System prompt to send with every request. When unset or empty, no system prompt is sent (no default/date prompt is injected). |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
@@ -59,59 +57,6 @@ llm-cli-py models
 
 # Override API URL and API key on the command line
 llm-cli-py --api-url https://api.example.com/v1 --api-key sk-your-key -m gpt-4o
-```
-
-### OpenRouter Web Search (Server Tool)
-
-When `LLM_CLI_API_URL` is set to an OpenRouter endpoint (e.g.
-`https://openrouter.ai/api/v1`), the CLI automatically registers the
-`openrouter:web_search` server tool. The model decides when a search is
-needed; OpenRouter executes it server-side and returns the results to the
-model within the same request loop - no client-side search code runs.
-
-```bash
-export LLM_CLI_API_URL="https://openrouter.ai/api/v1"
-export LLM_CLI_API_KEY="sk-or-..."
-export LLM_CLI_MODEL="openai/gpt-5.2"   # any OpenRouter model works
-llm-cli-py "What are the latest AI news?"
-```
-
-The tool is sent in its minimal form (`{"type": "openrouter:web_search"}`) and the
-provider applies sensible defaults (`engine: auto`, `max_results: 5`). To tune
-behaviour (e.g. `engine`, `max_results`, `max_uses`), add keys to
-`OPENROUTER_WEB_SEARCH_PARAMETERS` in `llm_cli_py/tools/web_search.py`;
-they are attached as the tool's `parameters` in the request.
-
-### OpenRouter Subcommand
-
-The `openrouter` subcommand provides quick access to OpenRouter rankings, credits,
-and model details. Short aliases make it even faster to type:
-
-| Alias | Description |
-|---|---|
-| `o` | Short for `openrouter` |
-
-Sub-subcommands also have short forms:
-
-| Alias | Full | Description |
-|---|---|---|
-| `r`, `rank` | `rankings` | Model usage rankings |
-| `c`, `credit` | `credits` | Credit / spending info |
-| `m` | `model` | Model details (requires model slug) |
-
-```bash
-# Full command
-llm-cli-py openrouter rankings
-llm-cli-py openrouter credits
-llm-cli-py openrouter model openai/gpt-4o
-
-# Short aliases
-llm-cli-py o r           # rankings
-llm-cli-py o c           # credits
-llm-cli-py o m openai/gpt-4o   # model details
-
-# No subcommand → show both rankings and credits
-llm-cli-py o
 ```
 
 ### Slash Commands (Interactive Mode)
@@ -154,10 +99,6 @@ tokens are rendered live as they arrive.
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
-2. **`openrouter:web_search`** (OpenRouter only) — Real-time web search server
-   tool. Registered automatically when `LLM_CLI_API_URL` points at
-   `openrouter.ai`. OpenRouter executes the search server-side and feeds the
-   results back to the model, so no client-side implementation is needed.
 
 ## Tool Call Approval
 

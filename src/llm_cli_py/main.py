@@ -12,8 +12,6 @@ from pathlib import Path
 import requests
 
 from . import __version__
-from .commands.openrouter import add_subparser as add_openrouter_subparser
-from .commands.openrouter import run_openrouter
 from .consts import (
     DEFAULT_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
@@ -28,10 +26,6 @@ from .session.interactive import run_interactive
 from .session.session import ActiveSession, SessionContext
 from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
 from .tools.registry import ToolRegistry
-from .tools.web_search import (
-    OPENROUTER_WEB_SEARCH_PARAMETERS,
-    OPENROUTER_WEB_SEARCH_TOOL_NAME,
-)
 from .ui import display as ui_display
 
 
@@ -75,20 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("models", help="List available models from the API")
 
-    add_openrouter_subparser(subparsers)
-
     return parser
 
 
-def initialize_tools(api_url: str | None = None) -> ToolRegistry:
+def initialize_tools() -> ToolRegistry:
     """Initialize and register all tools.
 
-    Args:
-        api_url: The configured API base URL. When it points at OpenRouter
-            (``openrouter.ai``), the ``openrouter:web_search`` server tool is
-            registered in addition to the local ``execute_python`` tool.
-            Server tools are executed by the provider, so no local function
-            is attached (``func=None``).
+    Returns:
+        A ToolRegistry with all built-in tools registered.
     """
     registry = ToolRegistry()
 
@@ -98,15 +86,6 @@ def initialize_tools(api_url: str | None = None) -> ToolRegistry:
         PYTHON_TOOL_SCHEMA,
         execute_python,
     )
-
-    if api_url and "openrouter.ai" in api_url:
-        registry.register(
-            OPENROUTER_WEB_SEARCH_TOOL_NAME,
-            "",  # description is not sent for server tools; provider applies its own.
-            OPENROUTER_WEB_SEARCH_PARAMETERS,
-            None,  # provider-executed server tool
-            server_tool=True,
-        )
 
     return registry
 
@@ -158,10 +137,6 @@ def main() -> None:
         run_models(api_url, api_key)
         return
 
-    if args.command in ("openrouter", "o"):
-        run_openrouter(args)
-        return
-
     # ── Resolve model ──────────────────────────────────────────────
     # Priority: 1) -m/--model, 2) LLM_CLI_MODEL env
     model = args.model or os.environ.get(ENV_MODEL, "")
@@ -171,9 +146,7 @@ def main() -> None:
     request_timeout = DEFAULT_REQUEST_TIMEOUT
 
     # ── Initialize tools ───────────────────────────────────────────
-    # The OpenRouter web search server tool is registered automatically when
-    # the API URL points at OpenRouter.
-    tool_registry = initialize_tools(api_url=api_url)
+    tool_registry = initialize_tools()
 
     # ── Initialize LLM client and run session ────────────────────────
     with LlmApiClient(

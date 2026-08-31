@@ -198,19 +198,6 @@ class ActiveSession:
         for tc in tool_calls:
             tool = self.ctx.tool_registry.get(tc.name)
 
-            if tool is not None and tool.server_tool:
-                # Provider-executed server tool (e.g. openrouter:web_search):
-                # OpenRouter runs it server-side and injects the results into
-                # the model context automatically. Nothing to execute here -
-                # just continue the agent loop so the next request carries the
-                # search results and the model can answer (or search again).
-                ui.display.print_rule()
-                print(f"\U0001f30d Server tool: {tc.name} (executed by the provider)")
-                args_display = self._format_tool_arguments(tc.name, tc.arguments)
-                if args_display:
-                    ui.display.print_info("Args", args_display)
-                continue
-
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
 

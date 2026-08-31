@@ -60,12 +60,6 @@ class ToolSchema:
     name: str
     description: str
     parameters: dict[str, object]
-    server_tool: bool = False
-    """True for provider-executed server tools (e.g. ``openrouter:web_search``).
-
-    Server tools are sent in their minimal form (``{"type": name}``); the
-    ``description`` is not used and ``parameters`` is only attached when set.
-    """
 
 
 @dataclass
