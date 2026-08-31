@@ -112,16 +112,26 @@ class LlmApiClient(LlmClient):
         if tool_schemas:
             tools = []
             for ts in tool_schemas:
-                tools.append(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": ts.name,
-                            "description": ts.description,
-                            "parameters": ts.parameters,
-                        },
-                    }
-                )
+                if ts.server_tool:
+                    # Provider-executed server tool (e.g. openrouter:web_search):
+                    # advertised verbatim, executed by the provider server-side.
+                    tools.append(
+                        {
+                            "type": ts.name,
+                            **({"parameters": ts.parameters} if ts.parameters else {}),
+                        }
+                    )
+                else:
+                    tools.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": ts.name,
+                                "description": ts.description,
+                                "parameters": ts.parameters,
+                            },
+                        }
+                    )
             body["tools"] = tools
 
         return body
@@ -191,6 +201,9 @@ class LlmApiClient(LlmClient):
                 continue
 
             if delta.get("finish_reason"):
+                # Keep the raw finish_reason: "tool_calls" (user-defined tools)
+                # and "server_tool_calls" (OpenRouter server tools) both mean
+                # "the model asked for a tool and the loop must continue".
                 finish_reason = delta["finish_reason"]
 
             content = delta.get("content")

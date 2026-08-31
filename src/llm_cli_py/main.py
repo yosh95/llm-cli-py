@@ -28,6 +28,11 @@ from .session.interactive import run_interactive
 from .session.session import ActiveSession, SessionContext
 from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
 from .tools.registry import ToolRegistry
+from .tools.web_search import (
+    OPENROUTER_WEB_SEARCH_DESCRIPTION,
+    OPENROUTER_WEB_SEARCH_SCHEMA,
+    OPENROUTER_WEB_SEARCH_TOOL_NAME,
+)
 from .ui import display as ui_display
 
 
@@ -76,8 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def initialize_tools() -> ToolRegistry:
-    """Initialize and register all tools."""
+def initialize_tools(api_url: str | None = None) -> ToolRegistry:
+    """Initialize and register all tools.
+
+    Args:
+        api_url: The configured API base URL. When it points at OpenRouter
+            (``openrouter.ai``), the ``openrouter:web_search`` server tool is
+            registered in addition to the local ``execute_python`` tool.
+            Server tools are executed by the provider, so no local function
+            is attached (``func=None``).
+    """
     registry = ToolRegistry()
 
     registry.register(
@@ -86,6 +99,15 @@ def initialize_tools() -> ToolRegistry:
         PYTHON_TOOL_SCHEMA,
         execute_python,
     )
+
+    if api_url and "openrouter.ai" in api_url:
+        registry.register(
+            OPENROUTER_WEB_SEARCH_TOOL_NAME,
+            OPENROUTER_WEB_SEARCH_DESCRIPTION,
+            OPENROUTER_WEB_SEARCH_SCHEMA,
+            None,  # provider-executed server tool
+            server_tool=True,
+        )
 
     return registry
 
@@ -150,7 +172,9 @@ def main() -> None:
     request_timeout = DEFAULT_REQUEST_TIMEOUT
 
     # ── Initialize tools ───────────────────────────────────────────
-    tool_registry = initialize_tools()
+    # The OpenRouter web search server tool is registered automatically when
+    # the API URL points at OpenRouter.
+    tool_registry = initialize_tools(api_url=api_url)
 
     # ── Initialize LLM client and run session ────────────────────────
     with LlmApiClient(

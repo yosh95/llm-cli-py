@@ -8,6 +8,7 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 
 - **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, Anthropic via OpenRouter, local instances, etc.)
 - **Python Execution** — Built-in `execute_python` tool for running Python code
+- **OpenRouter Web Search** — When the API URL points at OpenRouter, the `openrouter:web_search` server tool is enabled automatically (provider-executed, real-time web search for any model)
 - **Interactive Session** — Persistent chat with history and slash commands
 - **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
 - **Markdown Rendering** — CJK-friendly Markdown output with Rich
@@ -59,6 +60,25 @@ llm-cli-py models
 # Override API URL and API key on the command line
 llm-cli-py --api-url https://api.example.com/v1 --api-key sk-your-key -m gpt-4o
 ```
+
+### OpenRouter Web Search (Server Tool)
+
+When `LLM_CLI_API_URL` is set to an OpenRouter endpoint (e.g.
+`https://openrouter.ai/api/v1`), the CLI automatically registers the
+`openrouter:web_search` server tool. The model decides when a search is
+needed; OpenRouter executes it server-side and returns the results to the
+model within the same request loop - no client-side search code runs.
+
+```bash
+export LLM_CLI_API_URL="https://openrouter.ai/api/v1"
+export LLM_CLI_API_KEY="sk-or-..."
+export LLM_CLI_MODEL="openai/gpt-5.2"   # any OpenRouter model works
+llm-cli-py "What are the latest AI news?"
+```
+
+The tool is advertised with sensible defaults (`engine: auto`, `max_results: 5`).
+You can tune it via the `OPENROUTER_WEB_SEARCH_*` constants in
+`llm_cli_py/tools/web_search.py`.
 
 ### OpenRouter Subcommand
 
@@ -132,6 +152,10 @@ tokens are rendered live as they arrive.
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
+2. **`openrouter:web_search`** (OpenRouter only) — Real-time web search server
+   tool. Registered automatically when `LLM_CLI_API_URL` points at
+   `openrouter.ai`. OpenRouter executes the search server-side and feeds the
+   results back to the model, so no client-side implementation is needed.
 
 ## Tool Call Approval
 

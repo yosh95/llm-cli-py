@@ -11,22 +11,41 @@ ToolFunc = Callable[..., ToolResult]
 
 
 class Tool:
-    """Represents a registered tool with its schema and implementation."""
+    """Represents a registered tool with its schema and implementation.
+
+    Attributes:
+        server_tool: When True, the tool is executed by the provider
+            (e.g. OpenRouter server tools such as ``openrouter:web_search``)
+            instead of by this application. ``func`` is None in that case and
+            the schema is emitted verbatim (``{"type": "openrouter:web_search"}``).
+    """
 
     def __init__(
         self,
         name: str,
         description: str,
         parameters: dict[str, object],
-        func: ToolFunc,
+        func: ToolFunc | None,
+        *,
+        server_tool: bool = False,
     ) -> None:
         self.name = name
         self.description = description
         self.parameters = parameters
         self.func = func
+        self.server_tool = server_tool
 
     @property
     def schema(self) -> ToolSchema:
+        if self.server_tool:
+            # Server tools are advertised verbatim (no wrapping in a
+            # "function" object); the provider executes them server-side.
+            return ToolSchema(
+                name=self.name,
+                description=self.description,
+                parameters=self.parameters,
+                server_tool=True,
+            )
         return ToolSchema(
             name=self.name,
             description=self.description,
@@ -45,10 +64,22 @@ class ToolRegistry:
         name: str,
         description: str,
         parameters: dict[str, object],
-        func: ToolFunc,
+        func: ToolFunc | None,
+        *,
+        server_tool: bool = False,
     ) -> None:
-        """Register a tool."""
-        self._tools[name] = Tool(name, description, parameters, func)
+        """Register a tool.
+
+        Args:
+            name: Tool name.
+            description: Tool description.
+            parameters: JSON Schema for the tool's parameters.
+            func: Callable implementing the tool. Must be None when
+                ``server_tool`` is True (the provider executes it).
+            server_tool: When True, the tool is executed by the provider
+                (OpenRouter server tools) instead of this application.
+        """
+        self._tools[name] = Tool(name, description, parameters, func, server_tool=server_tool)
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""

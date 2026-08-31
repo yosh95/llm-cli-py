@@ -60,6 +60,8 @@ class ToolSchema:
     name: str
     description: str
     parameters: dict[str, object]
+    server_tool: bool = False
+    """True for provider-executed server tools (e.g. ``openrouter:web_search``)."""
 
 
 @dataclass
