@@ -92,12 +92,12 @@ class TestToolCall:
     def test_tool_call_with_explanation(self) -> None:
         tc = ToolCall(
             id="call_1",
-            name="execute_python",
-            arguments={"code": "print('hi')", "explanation": "Run some Python code"},
+            name="web_search",
+            arguments={"query": "python", "explanation": "Need to search for Python info"},
         )
         assert tc.id == "call_1"
-        assert tc.name == "execute_python"
-        assert tc.arguments["explanation"] == "Run some Python code"
+        assert tc.name == "web_search"
+        assert tc.arguments["explanation"] == "Need to search for Python info"
 
 
 class TestClientState:

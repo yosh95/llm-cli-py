@@ -4,6 +4,9 @@
 DEFAULT_REQUEST_TIMEOUT: int = 300
 """Default timeout for LLM API requests (chat completions)."""
 
+DEFAULT_WEB_SEARCH_TIMEOUT: int = 30
+"""Default timeout for Brave Search API requests."""
+
 DEFAULT_MODEL_FETCH_TIMEOUT: int = 30
 """Default timeout for fetching model lists from providers."""
 
@@ -25,6 +28,20 @@ ENV_MODEL = "LLM_CLI_MODEL"
 
 DEFAULT_API_URL = "http://localhost:11434/v1"
 """Default LLM API base URL (OpenAI-compatible endpoint)."""
+
+# Brave Search API
+ENV_BRAVE_SEARCH_API_KEY = "BRAVE_SEARCH_API_KEY"
+"""Environment variable for the Brave Search API key."""
+
+BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/llm/context"
+"""Brave Search API endpoint (LLM Context API).
+
+Returns pre-extracted web content (text, tables, code blocks) ranked by
+relevance and ready for LLM consumption.
+"""
+
+BRAVE_SEARCH_MAX_RETRIES: int = 3
+"""Maximum number of retries for Brave Search API requests."""
 
 
 # ── Prompt history / chat log ─────────────────────────────────

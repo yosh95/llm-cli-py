@@ -26,6 +26,7 @@ from .session.interactive import run_interactive
 from .session.session import ActiveSession, SessionContext
 from .tools.python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
 from .tools.registry import ToolRegistry
+from .tools.web_search import WEB_SEARCH_DESCRIPTION, WEB_SEARCH_SCHEMA, web_search
 from .ui import display as ui_display
 
 
@@ -85,6 +86,13 @@ def initialize_tools() -> ToolRegistry:
         PYTHON_TOOL_DESCRIPTION,
         PYTHON_TOOL_SCHEMA,
         execute_python,
+    )
+
+    registry.register(
+        "web_search",
+        WEB_SEARCH_DESCRIPTION,
+        WEB_SEARCH_SCHEMA,
+        web_search,
     )
 
     return registry

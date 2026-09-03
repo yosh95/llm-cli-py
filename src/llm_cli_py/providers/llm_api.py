@@ -293,7 +293,7 @@ class LlmApiClient(LlmClient):
         Args:
             data: User input sources for this turn.
             tool_schemas: Tool schemas to advertise (always sent, since this CLI
-                enables ``execute_python`` by default).
+                enables ``web_search`` and ``execute_python`` by default).
             on_text: Optional callback invoked with each text delta (streaming).
 
         Returns:

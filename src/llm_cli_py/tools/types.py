@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SearchResultItem:
+    """A single search result from Brave Search."""
+
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "snippet": self.snippet,
+        }
 
 
 @dataclass
@@ -28,6 +44,28 @@ class ExecResult:
 
 
 @dataclass
+class SearchResult:
+    """Result of a web search via Brave Search.
+
+    Fields:
+        query: The original search query.
+        results: List of search result items.
+        result_count: Number of results returned.
+    """
+
+    query: str = ""
+    results: list[SearchResultItem] = field(default_factory=list)
+    result_count: int = 0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "query": self.query,
+            "results": [r.to_dict() for r in self.results],
+            "result_count": self.result_count,
+        }
+
+
+@dataclass
 class ToolError:
     """Represents a tool execution error.
 
@@ -41,5 +79,5 @@ class ToolError:
         return {"error": self.error}
 
 
-ToolResult = ExecResult | ToolError
+ToolResult = ExecResult | SearchResult | ToolError
 """Union type for all possible tool execution results."""

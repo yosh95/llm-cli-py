@@ -14,7 +14,7 @@ from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
 from llm_cli_py.tools.registry import ToolRegistry
-from llm_cli_py.tools.types import ExecResult, ToolError
+from llm_cli_py.tools.types import ExecResult, SearchResult, SearchResultItem, ToolError
 
 
 @pytest.fixture
@@ -103,6 +103,47 @@ class TestProcessAndPrint:
         captured = capsys.readouterr()
         assert "The answer is 42" in captured.out
         assert "Executing tool: calculate" in captured.out
+
+    def test_web_search_result_shown_on_terminal(
+        self, session: ActiveSession, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Web search tool call parameters and results are displayed on the terminal."""
+
+        def search_tool(query: str = "") -> SearchResult:  # noqa: ARG001
+            return SearchResult(
+                query=query,
+                results=[
+                    SearchResultItem(title="Top hit", url="https://a.com", snippet="Snippet A"),
+                    SearchResultItem(title="Second hit", url="https://b.com", snippet="Snippet B"),
+                ],
+                result_count=2,
+            )
+
+        session.ctx.tool_registry.register(
+            "web_search",
+            "Search the web",
+            {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+            search_tool,
+        )
+
+        tool_call = ToolCall(id="call_1", name="web_search", arguments={"query": "python"})
+        responses = [
+            LlmResponse(text=None, tool_calls=[tool_call], finish_reason="tool_calls"),
+            LlmResponse(text="Done"),
+        ]
+
+        with patch.object(session.client, "send", side_effect=responses):
+            session.process_and_print([DataSource(text="Search python")])
+
+        captured = capsys.readouterr()
+        # Execution line plus the full query are shown.
+        assert "Executing tool: web_search" in captured.out
+        assert "query=python" in captured.out
+        # Results are now displayed on the terminal.
+        assert "Top hit" in captured.out
+        assert "Second hit" in captured.out
+        assert "Tool Result:" in captured.out
+        assert "Found 2 result(s)" in captured.out
 
     def test_tool_not_found(self, session: ActiveSession, capsys: pytest.CaptureFixture[str]) -> None:
         tool_call = ToolCall(id="call_1", name="nonexistent_tool", arguments={})
@@ -259,6 +300,16 @@ class TestApprovalIntegration:
 
 class TestToolArgumentDisplay:
     """Terminal display of tool-call parameters (args) per tool."""
+
+    def test_web_search_shows_all_arguments(self, session: ActiveSession) -> None:
+        rendered = session._format_tool_arguments(
+            "web_search",
+            {"query": "python 3.13 release", "extra": "x"},
+        )
+        assert rendered == "query=python 3.13 release, extra=x"
+
+    def test_web_search_no_arguments_returns_none(self, session: ActiveSession) -> None:
+        assert session._format_tool_arguments("web_search", {}) is None
 
     def test_execute_python_shows_code_within_limit(self, session: ActiveSession) -> None:
         code = "print('hi')"

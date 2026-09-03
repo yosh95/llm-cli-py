@@ -16,6 +16,10 @@ class TestInitializeTools:
         registry = initialize_tools()
         assert "execute_python" in registry
 
+    def test_web_search_registered(self) -> None:
+        registry = initialize_tools()
+        assert "web_search" in registry
+
 
 class TestBuildParser:
     """Test argument parser already covered partially; here ensure main flow paths."""

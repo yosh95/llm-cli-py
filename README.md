@@ -2,11 +2,12 @@
 
 **Unified OpenAI-Compatible CLI for AI Agents (Python Edition)**
 
-A command-line interface for interacting with any OpenAI-compatible LLM API, with built-in tool support for Python execution.
+A command-line interface for interacting with any OpenAI-compatible LLM API, with built-in tool support for Python execution and web search.
 
 ## Features
 
 - **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, local instances, etc.)
+- **Web Search** — Built-in `web_search` tool using Brave Search API
 - **Python Execution** — Built-in `execute_python` tool for running Python code
 - **Interactive Session** — Persistent chat with history and slash commands
 - **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
@@ -34,6 +35,7 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key (required for the `web_search` tool). |
 | `SYSTEM_PROMPT` | System prompt to send with every request. When unset or empty, no system prompt is sent (no default/date prompt is injected). |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
@@ -99,6 +101,7 @@ tokens are rendered live as they arrive.
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
+2. **`web_search`** — Web search via Brave Search API (uses `BRAVE_SEARCH_API_KEY` env var)
 
 ## Tool Call Approval
 
@@ -117,6 +120,8 @@ its result are easy to tell apart:
 
 Parameter and result display per tool:
 
+- **`web_search`** — all parameters (the search query) are shown in full; the
+  returned hits (title, URL, snippet) are printed in the result block.
 - **`execute_python`** — the full `code` parameter is shown, and the result
   block includes the exit code plus stdout/stderr.
 - Other tools show no parameters by default (result block still printed).
