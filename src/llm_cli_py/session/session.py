@@ -9,7 +9,7 @@ from .. import ui
 from ..base import LlmClient
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
-from ..tools.types import ExecResult, SearchResult, ToolError
+from ..tools.types import ExecResult, ToolError
 from .stream_state import StreamState
 
 
@@ -171,7 +171,7 @@ class ActiveSession:
 
         lines: list[str] = []
 
-        if "error" in data and "stdout" not in data and "results" not in data:
+        if "error" in data and "stdout" not in data:
             # ToolError
             lines.append(f"Error: {data['error']}")
         elif "stdout" in data:
@@ -188,18 +188,6 @@ class ActiveSession:
                 lines.append("[stderr]")
                 for line in stderr_val.rstrip().splitlines():
                     lines.append(f"  {line}")
-        elif "results" in data:
-            # SearchResult
-            count = data.get("result_count", 0)
-            query = data.get("query", "")
-            lines.append(f"Found {count} result(s) for: {query}")
-            for i, r in enumerate(data.get("results", []), 1):
-                lines.append(f"  {i}. {r.get('title', '')}")
-                lines.append(f"     {r.get('url', '')}")
-                snippet = r.get("snippet", "")
-                if snippet:
-                    snip_display = snippet[:150] + "..." if len(snippet) > 150 else snippet
-                    lines.append(f"     {snip_display}")
         else:
             lines.append(content_str)
 
@@ -236,7 +224,7 @@ class ActiveSession:
 
                 if isinstance(result, ToolError):
                     content_str = result.error
-                elif isinstance(result, (ExecResult, SearchResult)):
+                elif isinstance(result, ExecResult):
                     content_str = json.dumps(result.to_dict(), ensure_ascii=False)
                 else:
                     content_str = json.dumps(result, ensure_ascii=False) if result is not None else ""
