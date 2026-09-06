@@ -33,7 +33,6 @@ class SlashCommandCompleter(Completer):
         self._commands = {
             "/help": "Show this help message",
             "/quit": "Exit the session",
-            "/clear": "Clear conversation history",
             "/info": "Show session information",
             "/dump": "Dump conversation history as TOML to stdout",
         }

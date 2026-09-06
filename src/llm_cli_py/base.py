@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from .models import ClientState, DataSource, LlmResponse, ToolSchema
+from .models import ClientState, DataSource, LlmResponse, Message, Role, ToolSchema
 
 
 class LlmClient(ABC):
     """Abstract base class for LLM API clients."""
 
     def __init__(self, model: str) -> None:
-        self._state = ClientState(model=model)
+        """Initialize state, reading the system prompt once at startup.
+
+        The ``SYSTEM_PROMPT`` environment variable is snapshotted here and
+        seeded as the first message of the conversation. It is intentionally
+        NOT re-read per request: mid-session changes would make later turns
+        inconsistent with earlier context. When unset or empty, no system
+        message is seeded (no default/date prompt is injected).
+        """
+        system_prompt = os.environ.get("SYSTEM_PROMPT", "")
+        self._state = ClientState(
+            model=model,
+            system_prompt=system_prompt,
+            conversation=[Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else [],
+        )
 
     @property
     def state(self) -> ClientState:

@@ -25,7 +25,6 @@ def _cmd_help(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     commands = [
         ("/help, /h", "Show this help message"),
         ("/quit, /q", "Exit the session"),
-        ("/clear, /c", "Clear conversation history"),
         ("/info, /i", "Show session info (API URL, model, tools)"),
         ("/dump", "Dump conversation history as TOML to stdout"),
     ]
@@ -36,12 +35,6 @@ def _cmd_help(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
 
 def _cmd_quit(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     return "exit"
-
-
-def _cmd_clear(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
-    session.client.state.conversation.clear()
-    ui.display.report_success("Conversation history cleared.")
-    return None
 
 
 def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
@@ -99,8 +92,6 @@ _SLASH_COMMANDS: dict[str, Callable[[ActiveSession, str], str | None]] = {
     "q": _cmd_quit,
     "quit": _cmd_quit,
     "exit": _cmd_quit,
-    "c": _cmd_clear,
-    "clear": _cmd_clear,
     "i": _cmd_info,
     "info": _cmd_info,
     "dump": _cmd_dump,

@@ -53,13 +53,30 @@ class TestLlmApiClient:
             api_url="https://api.example.com/v1",
             api_key="key",
         )
-        client._state.conversation = [Message(role=Role.USER, content="Hello")]
+        client._state.conversation.append(Message(role=Role.USER, content="Hello"))
         messages = client._build_messages()
 
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "You are a test assistant."
         assert messages[1]["role"] == "user"
         assert messages[1]["content"] == "Hello"
+
+    def test_system_prompt_snapshotted_at_init(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SYSTEM_PROMPT is read once at client init; later env changes are ignored."""
+        monkeypatch.setenv("SYSTEM_PROMPT", "Startup prompt.")
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://api.example.com/v1",
+            api_key="key",
+        )
+        assert client.state.system_prompt == "Startup prompt."
+        monkeypatch.setenv("SYSTEM_PROMPT", "Changed after init.")
+        client._state.conversation.append(Message(role=Role.USER, content="Hello"))
+
+        messages = client._build_messages()
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "Startup prompt."
+        assert messages[1]["role"] == "user"
 
     def test_build_messages_omits_system_prompt_when_env_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SYSTEM_PROMPT", "")

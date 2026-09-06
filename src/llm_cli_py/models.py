@@ -67,4 +67,6 @@ class ClientState:
     """State of an LLM client session."""
 
     model: str = ""
+    system_prompt: str = ""
+    """System prompt read once at client initialization (startup snapshot)."""
     conversation: list[Message] = field(default_factory=list)

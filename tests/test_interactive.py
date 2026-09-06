@@ -36,12 +36,6 @@ class TestSlashCommands:
         result = _handle_slash_command(session, "/quit")
         assert result == "exit"
 
-    def test_clear_command(self) -> None:
-        session = _make_session()
-        session.client.state.conversation = [Message(role=Role.USER, content="Hi")]
-        _handle_slash_command(session, "/clear")
-        assert session.client.state.conversation == []
-
     def test_info_command(self, capsys: pytest.CaptureFixture[str]) -> None:
         session = _make_session()
         _handle_slash_command(session, "/info")

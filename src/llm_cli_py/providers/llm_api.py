@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from typing import Any
 
@@ -13,15 +12,6 @@ from ..base import LlmClient
 from ..consts import DEFAULT_REQUEST_TIMEOUT
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..utils.http import post_with_retries
-
-
-def _get_system_prompt() -> str:
-    """Return the system prompt for every request.
-
-    Reads the ``SYSTEM_PROMPT`` environment variable. When unset, no system
-    prompt is sent (no default/date prompt is injected).
-    """
-    return os.environ.get("SYSTEM_PROMPT", "")
 
 
 class LlmApiClient(LlmClient):
@@ -72,10 +62,9 @@ class LlmApiClient(LlmClient):
         """Build the messages array for the API request."""
         messages: list[dict[str, Any]] = []
 
-        sys_prompt = _get_system_prompt()
-        if sys_prompt:
-            messages.append({"role": "system", "content": sys_prompt})
-
+        # The system prompt is seeded into the conversation at client
+        # initialization (see LlmClient.__init__) and simply replayed here
+        # with the rest of the history.
         for msg in self._state.conversation:
             entry: dict[str, Any] = {"role": msg.role.value}
 
