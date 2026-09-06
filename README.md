@@ -34,7 +34,7 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
-| `SYSTEM_PROMPT` | System prompt, read **once at startup** and seeded as the first conversation message. Mid-session env changes are not picked up. When unset or empty, no system prompt is sent (no default/date prompt is injected). Appears in `/dump` and the chat log. |
+| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read **once at startup** and seeded as the first conversation message. Mid-session env changes are not picked up. When unset or empty, no system prompt is sent (no default/date prompt is injected). Appears in `/dump` and the chat log. |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |

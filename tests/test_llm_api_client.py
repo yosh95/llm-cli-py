@@ -33,7 +33,7 @@ class TestLlmApiClient:
     """Test the OpenAI-compatible chat API client."""
 
     def test_build_messages_omits_system_prompt_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
+        monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
@@ -47,7 +47,7 @@ class TestLlmApiClient:
         assert messages[0]["content"] == "Hello"
 
     def test_build_messages_uses_system_prompt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SYSTEM_PROMPT", "You are a test assistant.")
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "You are a test assistant.")
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
@@ -62,15 +62,15 @@ class TestLlmApiClient:
         assert messages[1]["content"] == "Hello"
 
     def test_system_prompt_snapshotted_at_init(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SYSTEM_PROMPT is read once at client init; later env changes are ignored."""
-        monkeypatch.setenv("SYSTEM_PROMPT", "Startup prompt.")
+        """LLM_CLI_SYSTEM_PROMPT is read once at client init; later env changes are ignored."""
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "Startup prompt.")
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
             api_key="key",
         )
         assert client.state.system_prompt == "Startup prompt."
-        monkeypatch.setenv("SYSTEM_PROMPT", "Changed after init.")
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "Changed after init.")
         client._state.conversation.append(Message(role=Role.USER, content="Hello"))
 
         messages = client._build_messages()
@@ -79,7 +79,7 @@ class TestLlmApiClient:
         assert messages[1]["role"] == "user"
 
     def test_build_messages_omits_system_prompt_when_env_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SYSTEM_PROMPT", "")
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "")
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",
@@ -109,7 +109,8 @@ class TestLlmApiClient:
         assert body["stream"] is True
         assert body["tools"][0]["function"]["name"] == "python"
 
-    def test_send_appends_user_message(self) -> None:
+    def test_send_appends_user_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
         client = LlmApiClient(
             model="gpt-4o",
             api_url="https://api.example.com/v1",

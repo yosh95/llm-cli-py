@@ -30,7 +30,8 @@ class _ConcreteClient(LlmClient):
 class TestLlmClientBase:
     """Test the abstract base class functionality."""
 
-    def test_initialization(self) -> None:
+    def test_initialization(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
         client = _ConcreteClient(model="gpt-4o")
         assert client.state.model == "gpt-4o"
         assert client.state.conversation == []
