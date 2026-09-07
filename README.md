@@ -8,9 +8,51 @@ A command-line interface for interacting with any OpenAI-compatible LLM API, wit
 
 - **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, local instances, etc.)
 - **Python Execution** — Built-in `execute_python` tool for running Python code
+- **Extensible by Design** — Web search, image generation (via an image-generation LLM API with a key passed as an env var), and more run through `execute_python`, with endpoints/keys supplied via `LLM_CLI_SYSTEM_PROMPT` (no provider lock-in)
 - **Interactive Session** — Persistent chat with history and slash commands
 - **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
 - **Markdown Rendering** — CJK-friendly Markdown output with Rich
+
+## Design Philosophy
+
+This CLI ships **one tool only**: `execute_python`.
+
+- **Self-contained by construction** — The tool itself is written in Python, so
+  Python is guaranteed to exist in the user's environment. `execute_python` is
+  the single primitive everything else is built on.
+- **One tool is enough** — Web search, image generation (calling an
+  image-generation LLM API with a key passed via an environment variable), HTTP
+  requests, file processing, data analysis, and more were all verified to work
+  through `execute_python` alone (e.g., in CyberGym-style security testing) before it
+  became the only tool.
+- **No provider lock-in** — Instead of bundling a dedicated web-search tool tied
+  to one provider, capability information (endpoint, request shape, API key
+  location) is injected through `LLM_CLI_SYSTEM_PROMPT`. The agent then performs
+  the call itself via `execute_python`. Switching search providers means editing
+  one environment variable — never the tool.
+
+### Example: Web Search via the System Prompt
+
+Put brief usage notes for your search API into `LLM_CLI_SYSTEM_PROMPT`; the
+agent calls it from `execute_python` (shown here with the Ollama Web Search
+API — any provider works the same way):
+
+```bash
+export WEB_SEARCH_API_KEY="sk-..."   # the actual key stays in a normal env var
+export LLM_CLI_SYSTEM_PROMPT='You are a helpful coding agent.
+When you need web search, call the API below from execute_python:
+- Endpoint: POST https://ollama.com/api/web_search
+- Headers: Content-Type: application/json and Authorization: Bearer <value of WEB_SEARCH_API_KEY>
+- Body: {"query": "...", "max_results": 5}
+The key is available in the environment variable WEB_SEARCH_API_KEY.'
+```
+
+Result: working web search with **no built-in search tool** and no dependency on
+a specific provider — changing providers is just a prompt edit.
+
+> Note: `LLM_CLI_SYSTEM_PROMPT` appears in `/dump` and the chat log, so prefer
+> referencing the key by env var name (as above) over pasting the key itself
+> into the prompt.
 
 ## Quick Start
 
@@ -34,7 +76,7 @@ llm-cli-py -m gpt-4o
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
 | `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
 | `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
-| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read **once at startup** and seeded as the first conversation message. Mid-session env changes are not picked up. When unset or empty, no system prompt is sent (no default/date prompt is injected). Appears in `/dump` and the chat log. |
+| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read **once at startup** and seeded as the first conversation message. Mid-session env changes are not picked up. When unset or empty, no system prompt is sent (no default/date prompt is injected). Appears in `/dump` and the chat log. Can also carry capability notes (e.g., a web search endpoint + API key reference) that let the agent extend itself via `execute_python` — see [Design Philosophy](#design-philosophy). |
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |
@@ -98,6 +140,9 @@ tokens are rendered live as they arrive.
 ## Tools
 
 1. **`execute_python`** — Execute Python code in a sandboxed subprocess
+
+   This is the only tool **by design** — everything else is built on top of it
+   (see [Design Philosophy](#design-philosophy)).
 
 ## Tool Call Approval
 
