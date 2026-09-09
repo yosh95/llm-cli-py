@@ -1,6 +1,28 @@
 # ──────────────────────────────────────────────
 # llm-cli-py  Makefile
 # ──────────────────────────────────────────────
+#
+# Portable across Termux and normal Linux (Debian/Ubuntu):
+#   - ruff:   use system ruff if available (Termux: ruff has no prebuilt
+#             wheel and source builds fail without Rust); otherwise fall
+#             back to `uv run ruff` (works on Debian/Ubuntu via wheels).
+#   - pytest: skip uv re-sync when pytest is already in .venv
+#             (Termux: re-sync would try to build ruff and fail);
+#             otherwise use `uv run pytest` (installs dev group).
+
+ifeq ($(shell command -v ruff >/dev/null 2>&1 && echo 1 || echo 0),1)
+  RUFF := ruff
+  SYNC_EXTRA := --no-install-package ruff
+else
+  RUFF := uv run ruff
+  SYNC_EXTRA :=
+endif
+
+ifeq ($(shell test -x .venv/bin/pytest && echo 1 || echo 0),1)
+  PYTEST := uv run --no-sync pytest
+else
+  PYTEST := uv run pytest
+endif
 
 .PHONY: help format check test clean check-all
 
@@ -12,22 +34,22 @@ help:  ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 format:  ## Run ruff format (auto-format code)
-	uv run ruff format
+	$(RUFF) format
 
 check:   ## Run ruff check (linter)
-	uv run ruff check
+	$(RUFF) check
 
 test:   ## Run pytest
-	uv run pytest -v
+	$(PYTEST) -v
 
 install: ## Run uv sync --no-dev (CLI only)
 	uv sync --no-dev
 
-install-dev: ## Run uv sync (CLI + dev tools)
-	uv sync
+install-dev: ## Run uv sync (CLI + dev tools; skips ruff if system ruff exists)
+	uv sync $(SYNC_EXTRA)
 
-install-all: ## Run uv sync (everything)
-	uv sync
+install-all: ## Run uv sync (everything; skips ruff if system ruff exists)
+	uv sync $(SYNC_EXTRA)
 
 check-all: format check test  ## Run all checks: format → lint → test
 
