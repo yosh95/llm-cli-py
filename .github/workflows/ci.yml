@@ -16,21 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
         with:
+          # Sets UV_PYTHON so uv uses this Python version
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          pip install -e ".[dev]"
-          pip install pytest-cov
+        run: uv sync --group dev
 
       - name: Ruff check
-        run: ruff check src/ tests/
+        run: uv run ruff check src/ tests/
 
       - name: Ruff format check
-        run: ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/
 
       - name: Pytest
-        run: pytest tests/ -v
+        run: uv run pytest tests/ -v
