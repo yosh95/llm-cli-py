@@ -1,0 +1,26 @@
+# Dependabot: GitHub Actions と Python 依存の更新PRを週次で作成する
+version: 2
+updates:
+  # GitHub Actions(astral-sh/setup-uv, actions/checkout など)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+
+  # Python 依存(pyproject.toml / uv.lock)
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps"
