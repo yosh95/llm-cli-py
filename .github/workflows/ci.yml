@@ -14,10 +14,10 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           # Sets UV_PYTHON so uv uses this Python version
           python-version: ${{ matrix.python-version }}
