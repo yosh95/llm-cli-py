@@ -1,0 +1,33 @@
+# Dependabot PR を CI 成功時に自動マージする
+#
+# 仕組み:
+#   1. 必須チェック(lint-test (3.12) / lint-test (3.13))はブランチ保護で要求済み
+#   2. このワークフローが Dependabot PR に対して auto-merge(squash)を有効化する
+#   3. GitHub が必須チェック全緑を待ってからマージを実行する
+#
+# Dependabot がトリガーしたワークフローは GITHUB_TOKEN が読み取り専用のため、
+# on: pull_request からは auto-merge を有効化できない(403)。
+# → pull_request_target でトリガーし、base(github.repository)側の書き込み可能な
+#   トークンを使用する。チェックアウトや untrusted なコード実行は行わない。
+name: dependabot-auto-merge
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # Dependabot が作成した PR のみ対象(フォークからの PR は対象外)
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.repository == github.event.pull_request.head.repo.full_name &&
+      github.repository == 'yosh95/llm-cli-py'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
