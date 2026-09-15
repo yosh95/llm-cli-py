@@ -40,6 +40,18 @@ invocations. When unset, history is kept only in memory for the current run.
 ENV_CHAT_LOG_FILE = "LLM_CLI_CHAT_LOG_FILE"
 """Environment variable for the session (chat) log file.
 
-When set, the full conversation (same content as ``/dump``) is written to this
-file when the interactive session ends. When unset, nothing is saved.
+When set, the conversation (same content as ``/dump``, including per-message
+timestamps) is written to this file after every message that is added to the
+history -- not only when the session ends -- so the log survives a crash or an
+abrupt termination. When unset, nothing is saved.
+"""
+
+ENV_CHAT_LOG_APPEND = "LLM_CLI_CHAT_LOG_APPEND"
+"""Environment variable switching the chat log to append mode.
+
+When set to a truthy value (``1``/``true``/``yes``/``on``), only newly added
+messages are appended to the log file as ``[[message]]`` TOML tables instead of
+rewriting the whole conversation. The file then keeps history across sessions
+and stays valid TOML as a whole (useful with a per-day file name). When unset,
+the log file always mirrors the current session.
 """

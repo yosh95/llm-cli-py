@@ -7,10 +7,28 @@ import uuid
 
 from .. import ui
 from ..base import LlmClient
-from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
+from ..models import ClientState, DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, ToolError
+from ..utils.timeutil import now_iso
 from .stream_state import StreamState
+
+
+def _append_tool_message(state: ClientState, content: str, tool_call_id: str) -> None:
+    """Add a tool result to the conversation and persist the history immediately.
+
+    Tool output is part of the record, so it is timestamped and pushed to the
+    chat log right away (same as user/assistant messages).
+    """
+    state.conversation.append(
+        Message(
+            role=Role.TOOL,
+            content=content,
+            tool_call_id=tool_call_id,
+            timestamp=now_iso(),
+        )
+    )
+    state.notify_changed()
 
 
 class SessionContext:
@@ -210,12 +228,10 @@ class ActiveSession:
 
             if not tool:
                 ui.display.report_error(f"Tool '{tc.name}' not found")
-                self.client.state.conversation.append(
-                    Message(
-                        role=Role.TOOL,
-                        content=f"Tool '{tc.name}' not found",
-                        tool_call_id=tc.id,
-                    )
+                _append_tool_message(
+                    self.client.state,
+                    f"Tool '{tc.name}' not found",
+                    tc.id,
                 )
                 continue
 
@@ -233,20 +249,8 @@ class ActiveSession:
                 result_lines = self._format_tool_result(content_str)
                 ui.display.print_tool_result(result_lines)
 
-                self.client.state.conversation.append(
-                    Message(
-                        role=Role.TOOL,
-                        content=content_str,
-                        tool_call_id=tc.id,
-                    )
-                )
+                _append_tool_message(self.client.state, content_str, tc.id)
 
             except Exception as e:
                 ui.display.report_error(f"Tool '{tc.name}' failed: {e}")
-                self.client.state.conversation.append(
-                    Message(
-                        role=Role.TOOL,
-                        content=str(e),
-                        tool_call_id=tc.id,
-                    )
-                )
+                _append_tool_message(self.client.state, str(e), tc.id)

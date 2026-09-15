@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from llm_cli_py.models import DataSource
 from llm_cli_py.providers.llm_api import LlmApiClient
 
@@ -121,6 +123,29 @@ class TestSendStreaming:
         assert json_body["stream"] is True
         assert result.text == "Hi"
         assert client._state.conversation[-1].content == "Hi"
+
+    def test_send_notifies_state_change_per_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The client signals history changes so the log can be flushed per message."""
+        # Keep the history deterministic: no system message is seeded.
+        monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
+        client = LlmApiClient("m", "https://api.example.com/v1", "k")
+        counts: list[int] = []
+        client.state.on_change = lambda: counts.append(len(client.state.conversation))
+        stream_resp = _make_stream_response(
+            [
+                _chunk({"content": "Hi"}),
+                _chunk({}, finish_reason="stop"),
+                "data: [DONE]",
+            ]
+        )
+        stream_resp.status_code = 200
+
+        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp):
+            client.send([DataSource(text="Hello")], [])
+
+        # Once for the user turn (before the request) and once for the answer.
+        assert counts == [1, 2]
+        assert client.state.conversation[-1].timestamp is not None
 
     def test_send_streaming_tool_call_success(self) -> None:
         client = LlmApiClient("m", "https://api.example.com/v1", "k")

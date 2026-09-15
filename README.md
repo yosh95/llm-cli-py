@@ -80,7 +80,8 @@ uv run llm-cli-py -m gpt-4o
 | `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |
-| `LLM_CLI_CHAT_LOG_FILE` | Path to write the full conversation (same content as `/dump`) when an interactive session ends. If unset, the conversation is not saved to disk. |
+| `LLM_CLI_CHAT_LOG_FILE` | Path to write the conversation (same content as `/dump`, including timestamps) to. It is written **after every message**, not only at exit, so the log survives a crash / `kill` / power loss. If unset, the conversation is not saved to disk. |
+| `LLM_CLI_CHAT_LOG_APPEND` | Set to `1`/`true`/`yes`/`on` to append only the newly added messages as `[[message]]` tables instead of rewriting the whole file. Earlier sessions stay in the same file (remains valid TOML overall) — handy with a per-day file name. |
 
 ## Usage
 
@@ -124,10 +125,36 @@ event loop) is initialized only once and never conflicts with itself.
 - **Prompt history** — When `LLM_CLI_PROMPT_HISTORY_FILE` is set, your prompt
   input history is persisted to that file across invocations. If it is unset,
   history lives only in memory for the current run.
-- **Session log** — When `LLM_CLI_CHAT_LOG_FILE` is set, the full conversation
-  (the same content as the `/dump` command) is written to that file when the
-  interactive session ends (via `/quit`, Ctrl+D, or otherwise). If it is unset,
-  nothing is saved.
+- **Session log** — When `LLM_CLI_CHAT_LOG_FILE` is set, the conversation (the
+  same content as the `/dump` command) is written to that file **as the session
+  runs**: the log is flushed after every message that enters the history (user
+  turn, assistant answer, tool result) — the user's turn is even flushed
+  *before* the request is sent — so an abrupt end (crash, `kill -9`, power loss)
+  still leaves everything up to that point on disk. The file is replaced
+  atomically (temp file + rename), so a reader never sees a half-written log.
+  If the env var is unset, nothing is saved.
+
+### Conversation timestamps
+
+Every message carries a local ISO 8601 timestamp (`Message.timestamp`, e.g.
+`2026-09-16T12:34:56+09:00`), shown in `/dump` and in the chat log:
+
+```toml
+[[message]]
+role = "user"
+content = "What is the capital of France?"
+timestamp = "2026-09-16T12:34:56+09:00"
+
+[[message]]
+role = "assistant"
+content = "Paris."
+timestamp = "2026-09-16T12:34:58+09:00"
+```
+
+Timestamps are **local metadata only**: they are recorded when the message is
+added to the history, and they are deliberately stripped out of the API request
+(`_build_messages` emits only `role` / `content` / `tool_calls` / `tool_call_id`),
+so they never reach the model and cannot change what is sent or billed.
 
 ## Streaming
 

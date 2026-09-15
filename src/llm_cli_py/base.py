@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 from .models import ClientState, DataSource, LlmResponse, Message, Role, ToolSchema
+from .utils.timeutil import now_iso
 
 
 class LlmClient(ABC):
@@ -21,11 +22,17 @@ class LlmClient(ABC):
         inconsistent with earlier context. When unset or empty, no system
         message is seeded (no default/date prompt is injected).
         """
+        # Timestamps are local metadata (chat log / dump only); they are never
+        # sent to the API -- see LlmApiClient._build_messages.
         system_prompt = os.environ.get("LLM_CLI_SYSTEM_PROMPT", "")
         self._state = ClientState(
             model=model,
             system_prompt=system_prompt,
-            conversation=[Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else [],
+            conversation=(
+                [Message(role=Role.SYSTEM, content=system_prompt, timestamp=now_iso())]
+                if system_prompt
+                else []
+            ),
         )
 
     @property

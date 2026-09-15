@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Callable
 
 import tomli_w
 
 from .. import ui
-from ..consts import ENV_CHAT_LOG_FILE
-from ..models import DataSource
+from ..consts import ENV_CHAT_LOG_APPEND, ENV_CHAT_LOG_FILE
+from ..models import DataSource, Message
 from .prompt import prompt
 from .session import ActiveSession
+
+_CHAT_LOG_TRUTHY = ("1", "true", "yes", "on")
 
 
 def _get_prompt_text() -> str:
@@ -49,34 +52,138 @@ def _cmd_info(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
     return None
 
 
+def _message_to_dict(message: Message) -> dict[str, object]:
+    """Render one message as a TOML-serialisable dict (timestamps included)."""
+    entry: dict[str, object] = {
+        "role": message.role.value,
+        "content": message.content,
+    }
+    if message.timestamp:
+        entry["timestamp"] = message.timestamp
+    if message.tool_call_id is not None:
+        entry["tool_call_id"] = message.tool_call_id
+    return entry
+
+
+def _render_messages(messages: list[Message]) -> str:
+    """Render messages as TOML ``[[message]]`` tables.
+
+    One table per message keeps the file appendable (see ``ChatLogWriter``) and
+    stays readable for long, multi-line content -- tool results and the system
+    prompt would otherwise collapse into one enormous line.
+    """
+    return "".join(
+        "[[message]]\n" + tomli_w.dumps(_message_to_dict(m), multiline_strings=True) for m in messages
+    )
+
+
 def _dump_toml(session: ActiveSession) -> str:
     """Render the conversation history as TOML (same content as ``/dump``)."""
-    data: dict[str, object] = {
-        "message": [
-            {
-                "role": m.role.value,
-                "content": m.content,
-            }
-            for m in session.client.state.conversation
-        ]
-    }
-    return tomli_w.dumps(data).replace("\\n", "\n")
+    return _render_messages(session.client.state.conversation)
+
+
+class ChatLogWriter:
+    """Incrementally persist the conversation to the chat log file.
+
+    Called after every message appended to the history (user turn, assistant
+    answer, tool result) instead of only when the session ends, so the log is
+    already on disk when the session dies abruptly (crash, SIGKILL, power loss).
+    Failures are reported once and never interrupt the chat.
+
+    Two modes:
+
+    - **snapshot** (default): the file always mirrors the current session. It is
+      rewritten atomically (temp file + ``os.replace``) so a reader never sees a
+      half-written log.
+    - **append** (``LLM_CLI_CHAT_LOG_APPEND=1``): only newly added messages are
+      appended as ``[[message]]`` tables. Earlier sessions stay in the same file
+      and the file remains valid TOML overall (handy with a per-day filename).
+    """
+
+    def __init__(self, path: str, *, append: bool = False) -> None:
+        self.path = path
+        self.append = append
+        self._written = 0
+        """Number of messages already on disk (drives append mode)."""
+        self._last_error: str | None = None
+
+    def write(self, messages: list[Message]) -> None:
+        """Write the conversation (or just its new tail) to disk."""
+        try:
+            if self.append:
+                self._append(messages)
+            else:
+                self._write_snapshot(messages)
+        except OSError as e:
+            self._report_once(f"Failed to write chat log to '{self.path}': {e}")
+        self._written = len(messages)
+
+    def _write_snapshot(self, messages: list[Message]) -> None:
+        tmp_path = f"{self.path}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                fh.write(_render_messages(messages))
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self.path)
+        except OSError:
+            with contextlib.suppress(OSError):  # best-effort temp-file cleanup
+                os.unlink(tmp_path)
+            raise
+
+    def _append(self, messages: list[Message]) -> None:
+        text = _render_messages(messages[self._written :])
+        if not text:
+            return
+        with open(self.path, "a", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def _report_once(self, message: str) -> None:
+        if message == self._last_error:
+            return
+        self._last_error = message
+        ui.display.report_warning(message)
+
+
+_chat_log_writer: ChatLogWriter | None = None
+
+
+def _attach_chat_log(session: ActiveSession) -> None:
+    """Register the incremental chat-log writer on the session's state.
+
+    If ``LLM_CLI_CHAT_LOG_FILE`` is unset (or empty), no writer is attached and
+    nothing is saved. The history collected before the loop started (system
+    prompt, initial ``-s`` sources) is flushed immediately.
+    """
+    global _chat_log_writer
+    log_path = os.environ.get(ENV_CHAT_LOG_FILE, "").strip()
+    if not log_path:
+        _chat_log_writer = None
+        return
+    append = os.environ.get(ENV_CHAT_LOG_APPEND, "").strip().lower() in _CHAT_LOG_TRUTHY
+    _chat_log_writer = ChatLogWriter(log_path, append=append)
+    session.client.state.on_change = lambda: _save_chat_log(session)
+    _save_chat_log(session)
+
+
+def _detach_chat_log(session: ActiveSession) -> None:
+    """Drop the change listener so the writer is not kept alive after the loop."""
+    global _chat_log_writer
+    session.client.state.on_change = None
+    _chat_log_writer = None
 
 
 def _save_chat_log(session: ActiveSession) -> None:
-    """Persist the session conversation to the configured chat log file.
+    """Flush the conversation to the configured chat log file.
 
-    The content is identical to ``/dump``. If LLM_CLI_CHAT_LOG_FILE is unset,
-    nothing is saved.
+    Invoked on every history change (via ``ClientState.on_change``) and once more
+    when the session ends. Does nothing when no log file is configured.
     """
-    log_path = os.environ.get(ENV_CHAT_LOG_FILE, "").strip()
-    if not log_path:
+    if _chat_log_writer is None:
         return
-    try:
-        with open(log_path, "w", encoding="utf-8") as fh:
-            fh.write(_dump_toml(session))
-    except OSError as e:
-        ui.display.report_warning(f"Failed to save chat log to '{log_path}': {e}")
+    _chat_log_writer.write(session.client.state.conversation)
 
 
 def _cmd_dump(session: ActiveSession, args: str) -> str | None:  # noqa: ARG001
@@ -110,10 +217,14 @@ def run_interactive(
     """
     print("Type /h for help, /q to quit.")
 
-    if initial_sources:
-        session.process_and_print(initial_sources)
-
     try:
+        # Attach before the first turn so even the initial ``-s`` processing is
+        # logged as it happens.
+        _attach_chat_log(session)
+
+        if initial_sources:
+            session.process_and_print(initial_sources)
+
         while True:
             try:
                 ui.display.print_rule()
@@ -141,9 +252,10 @@ def run_interactive(
                 ui.display.report_info("The session continues. You can try again.")
                 continue
     finally:
-        # Save the conversation when the session ends (EOF, /quit, Ctrl+C halt,
-        # or an unexpected error), if a log file is configured via env.
+        # Safety net: the log is already written after every message, but flush
+        # once more on the way out (EOF, /quit, Ctrl+C halt, unexpected error).
         _save_chat_log(session)
+        _detach_chat_log(session)
 
 
 def _handle_slash_command(session: ActiveSession, input_str: str) -> str:

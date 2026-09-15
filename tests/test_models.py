@@ -100,6 +100,42 @@ class TestToolCall:
         assert tc.arguments["explanation"] == "Run some Python code"
 
 
+class TestMessageTimestamp:
+    """Messages carry an optional local timestamp (log/dump only)."""
+
+    def test_timestamp_defaults_to_none(self) -> None:
+        assert Message(role=Role.USER, content="Hello").timestamp is None
+
+    def test_timestamp_can_be_set(self) -> None:
+        msg = Message(role=Role.USER, content="Hello", timestamp="2026-09-16T12:34:56+09:00")
+        assert msg.timestamp == "2026-09-16T12:34:56+09:00"
+
+    def test_timestamps_do_not_affect_equality(self) -> None:
+        """Positional/keyword construction stays backwards compatible."""
+        assert Message(Role.USER, "Hi") == Message(role=Role.USER, content="Hi")
+
+
+class TestClientStateNotifyChanged:
+    """ClientState notifies a listener so the chat log can be written per message."""
+
+    def test_notify_calls_listener(self) -> None:
+        calls: list[int] = []
+        state = ClientState(on_change=lambda: calls.append(1))
+        state.notify_changed()
+        assert calls == [1]
+
+    def test_notify_without_listener_is_noop(self) -> None:
+        ClientState().notify_changed()  # must not raise
+
+    def test_listener_errors_are_swallowed(self) -> None:
+        def boom() -> None:
+            msg = "log write failed"
+            raise RuntimeError(msg)
+
+        state = ClientState(on_change=boom)
+        state.notify_changed()  # logging must never break a request
+
+
 class TestClientState:
     """Test ClientState dataclass."""
 

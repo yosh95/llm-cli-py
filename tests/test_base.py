@@ -6,6 +6,7 @@ Covers display name and abstract method enforcement.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 import pytest
 
@@ -40,6 +41,15 @@ class TestLlmClientBase:
         client = _ConcreteClient(model="claude-3")
         assert isinstance(client.state, ClientState)
         assert client.state.model == "claude-3"
+
+    def test_system_message_is_timestamped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The seeded system message carries a local timestamp for the log."""
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "You are a test assistant.")
+        client = _ConcreteClient(model="gpt-4o")
+        system_msg = client.state.conversation[0]
+        assert system_msg.role.value == "system"
+        assert system_msg.timestamp is not None
+        datetime.fromisoformat(system_msg.timestamp)
 
     def test_send_is_abstract(self) -> None:
         """Verify that LlmClient.send is abstract and must be overridden."""

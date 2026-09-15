@@ -5,6 +5,8 @@ from __future__ import annotations
 from llm_cli_py.consts import (
     ENV_API_KEY,
     ENV_API_URL,
+    ENV_CHAT_LOG_APPEND,
+    ENV_CHAT_LOG_FILE,
     ENV_MODEL,
 )
 
@@ -16,3 +18,5 @@ class TestConsts:
         assert ENV_API_KEY == "LLM_CLI_API_KEY"
         assert ENV_API_URL == "LLM_CLI_API_URL"
         assert ENV_MODEL == "LLM_CLI_MODEL"
+        assert ENV_CHAT_LOG_FILE == "LLM_CLI_CHAT_LOG_FILE"
+        assert ENV_CHAT_LOG_APPEND == "LLM_CLI_CHAT_LOG_APPEND"

@@ -12,6 +12,7 @@ from ..base import LlmClient
 from ..consts import DEFAULT_REQUEST_TIMEOUT
 from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..utils.http import post_with_retries
+from ..utils.timeutil import now_iso
 
 
 class LlmApiClient(LlmClient):
@@ -59,7 +60,12 @@ class LlmApiClient(LlmClient):
         self.close()
 
     def _build_messages(self) -> list[dict[str, Any]]:
-        """Build the messages array for the API request."""
+        """Build the messages array for the API request.
+
+        Only the fields the API understands are emitted. ``Message`` carries
+        extra local metadata (``timestamp``) that is intentionally dropped here:
+        it is for the chat log / ``/dump`` only and must never reach the model.
+        """
         messages: list[dict[str, Any]] = []
 
         # The system prompt is seeded into the conversation at client
@@ -239,7 +245,9 @@ class LlmApiClient(LlmClient):
             elif ds.source_type == "url":
                 user_content += "[URL content]:\n" + ds.text + "\n"
         if user_content.strip():
-            self._state.conversation.append(Message(role=Role.USER, content=user_content.strip()))
+            self._state.conversation.append(
+                Message(role=Role.USER, content=user_content.strip(), timestamp=now_iso())
+            )
 
     def _record_assistant(self, result: LlmResponse) -> None:
         """Append the assistant response (text/reasoning/tool_calls) to history."""
@@ -268,6 +276,7 @@ class LlmApiClient(LlmClient):
                 role=Role.ASSISTANT,
                 content=result.text or "",
                 tool_calls=tool_calls_data,
+                timestamp=now_iso(),
             )
         )
 
@@ -293,6 +302,9 @@ class LlmApiClient(LlmClient):
             failure (no silent non-streaming fallback).
         """
         self._append_user_messages(data)
+        # The user's turn is now in the history: flush it to the chat log right
+        # away so it survives even if this request never returns (crash, kill).
+        self.state.notify_changed()
 
         messages = self._build_messages()
         body = self._build_request(messages, tool_schemas)
@@ -311,4 +323,5 @@ class LlmApiClient(LlmClient):
         )
 
         self._record_assistant(result)
+        self.state.notify_changed()
         return result

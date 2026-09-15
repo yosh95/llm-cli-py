@@ -7,12 +7,13 @@ and context manager.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from llm_cli_py.models import DataSource, Message, Role, ToolSchema
+from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolSchema
 from llm_cli_py.providers.llm_api import LlmApiClient
 
 
@@ -90,6 +91,44 @@ class TestLlmApiClient:
 
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
+
+    def test_conversation_messages_are_timestamped(self) -> None:
+        """User and assistant messages record a parseable local ISO timestamp."""
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://api.example.com/v1",
+            api_key="key",
+        )
+        client._append_user_messages([DataSource(text="Hello")])
+        user_msg = client._state.conversation[-1]
+        assert user_msg.timestamp is not None
+        datetime.fromisoformat(user_msg.timestamp)  # must be valid ISO 8601
+
+        client._record_assistant(LlmResponse(text="Hi there"))
+        assistant_msg = client._state.conversation[-1]
+        assert assistant_msg.timestamp is not None
+        datetime.fromisoformat(assistant_msg.timestamp)  # must be valid ISO 8601
+
+    def test_timestamps_are_not_sent_to_the_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Timestamps are local metadata: they must never reach the model."""
+        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "You are a test assistant.")
+        client = LlmApiClient(
+            model="gpt-4o",
+            api_url="https://api.example.com/v1",
+            api_key="key",
+        )
+        client._append_user_messages([DataSource(text="Hello")])
+        client._record_assistant(LlmResponse(text="Hi there"))
+        client._state.conversation.append(
+            Message(
+                role=Role.TOOL, content="42", tool_call_id="call_1", timestamp="2026-09-16T00:00:00+09:00"
+            )
+        )
+
+        messages = client._build_messages()
+        assert messages  # the history is sent ...
+        assert all("timestamp" not in m for m in messages)  # ... without timestamps
+        assert json.dumps(messages, ensure_ascii=False).count("timestamp") == 0
 
     def test_build_request_with_tools(self) -> None:
         client = LlmApiClient(
