@@ -24,13 +24,17 @@ else
   PYTEST := uv run pytest
 endif
 
-.PHONY: help format check test clean check-all
+# Absolute path of this project. Used by install-global so the tool keeps
+# working after `make clean` (which removes .venv) and from any cwd.
+PROJECT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
+.PHONY: help format check test install install-dev install-all install-global uninstall-global clean clean-all check-all
 
 .DEFAULT_GOAL := help
 
 help:  ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \\
-		| sort \\
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+		| sort \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 format:  ## Run ruff format (auto-format code)
@@ -42,7 +46,7 @@ check:   ## Run ruff check (linter)
 test:   ## Run pytest
 	$(PYTEST) -v
 
-install: ## Run uv sync --no-dev (CLI only)
+install: ## Run uv sync --no-dev (creates .venv; does NOT survive `make clean`)
 	uv sync --no-dev
 
 install-dev: ## Run uv sync (CLI + dev tools; skips ruff if system ruff exists)
@@ -51,9 +55,21 @@ install-dev: ## Run uv sync (CLI + dev tools; skips ruff if system ruff exists)
 install-all: ## Run uv sync (everything; skips ruff if system ruff exists)
 	uv sync $(SYNC_EXTRA)
 
+install-global: ## Install as a uv tool (editable, own venv, survives `make clean`)
+	@echo "Installing editable uv tool from $(PROJECT_DIR) ..."
+	uv tool install -e "$(PROJECT_DIR)" --force
+	@echo
+	@echo "Done. The command 'llm-cli-py' is now independent of ./$(notdir $(PROJECT_DIR))/.venv,"
+	@echo "so 'make clean' no longer breaks it (edits in src/ still take effect immediately)."
+	@command -v llm-cli-py >/dev/null 2>&1 || \
+		echo "note: not on PATH yet - run 'uv tool update-shell', or add '$$(uv tool dir --bin)' to PATH"
+
+uninstall-global: ## Remove the uv tool installed by install-global
+	uv tool uninstall llm-cli-py
+
 check-all: format check test  ## Run all checks: format → lint → test
 
-clean:  ## Remove all intermediate artifacts (caches, builds, egg-info, venv)
+clean:  ## Remove intermediate artifacts (keeps .venv, so the CLI stays usable)
 	@echo "Removing __pycache__ directories..."
 	find . -type d -name __pycache__ -not -path './.venv/*' -exec rm -rf {} +
 	@echo "Removing tool caches..."
@@ -62,6 +78,10 @@ clean:  ## Remove all intermediate artifacts (caches, builds, egg-info, venv)
 	rm -rf dist/ build/
 	@echo "Removing egg-info..."
 	rm -rf src/*.egg-info/
+	@echo "Kept .venv (use 'make clean-all' to remove it)."
+	@echo "Done."
+
+clean-all: clean  ## Remove everything including .venv (needs `make install` again)
 	@echo "Removing virtual environment..."
 	rm -rf .venv
-	@echo "Done."
+	@echo "Done. Re-create it with 'make install' / 'make install-dev'."
