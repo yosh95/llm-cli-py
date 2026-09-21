@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 
 from .. import ui
 from ..base import LlmClient
@@ -51,7 +50,6 @@ class ActiveSession:
     ) -> None:
         self.client = client
         self.ctx = ctx
-        self.trace_id = str(uuid.uuid4())
 
     def process_and_print(self, data: list[DataSource]) -> None:
         """Main processing loop: send to LLM, handle tool calls, display results."""
@@ -133,7 +131,7 @@ class ActiveSession:
     @staticmethod
     def _has_broken_tool_call(tool_calls: list[ToolCall]) -> bool:
         """Return True if any tool call has unparseable (truncated) arguments."""
-        return any(isinstance(tc.arguments, dict) and "raw" in tc.arguments for tc in tool_calls)
+        return any(tc.parse_error is not None for tc in tool_calls)
 
     def _drop_broken_tool_calls_from_history(self, tool_calls: list[ToolCall]) -> None:
         """Remove the just-recorded broken tool calls from conversation history.
@@ -143,7 +141,7 @@ class ActiveSession:
         some OpenAI-compatible APIs reject with HTTP 400. Drop them so the user
         can simply retry with a clean assistant message.
         """
-        broken_ids = {tc.id for tc in tool_calls if isinstance(tc.arguments, dict) and "raw" in tc.arguments}
+        broken_ids = {tc.id for tc in tool_calls if tc.parse_error is not None}
         for msg in reversed(self.client.state.conversation):
             if msg.role != Role.ASSISTANT or not msg.tool_calls:
                 continue
@@ -153,25 +151,11 @@ class ActiveSession:
             break
 
     @staticmethod
-    def _format_tool_arguments(tool_name: str, arguments: dict[str, object]) -> str | None:
-        """Format tool-call parameters for terminal display.
-
-        All parameters for every tool are displayed in full.
-
-        - ``execute_python``: the ``code`` parameter is returned as-is
-          (with embedded newlines preserved) so it can be rendered as
-          a code block by the caller.
-        - Other tools: all key=value pairs are shown inline.
-        """
+    def _format_tool_arguments(arguments: dict[str, object]) -> str | None:
+        """Format tool-call parameters for terminal display (all shown in full)."""
         if not arguments:
             return None
-
-        if tool_name == "execute_python":
-            code = arguments.get("code")
-            return str(code) if code is not None else None
-
-        parts = [f"{key}={value}" for key, value in arguments.items()]
-        return ", ".join(parts) if parts else None
+        return ", ".join(f"{key}={value}" for key, value in arguments.items())
 
     @staticmethod
     def _format_tool_result(content_str: str) -> list[str]:
@@ -219,12 +203,9 @@ class ActiveSession:
             ui.display.print_rule()
             print(f"\U0001f680 Executing tool: {tc.name}...")
 
-            args_display = self._format_tool_arguments(tc.name, tc.arguments)
+            args_display = self._format_tool_arguments(tc.arguments)
             if args_display:
-                if tc.name == "execute_python":
-                    ui.display.print_code_block(args_display)
-                else:
-                    ui.display.print_info("Args", args_display)
+                ui.display.print_info("Args", args_display)
 
             if not tool:
                 ui.display.report_error(f"Tool '{tc.name}' not found")

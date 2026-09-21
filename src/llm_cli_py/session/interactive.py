@@ -215,8 +215,6 @@ def run_interactive(
         session: The active session to drive.
         initial_sources: Optional initial inputs to process before prompting.
     """
-    print("Type /h for help, /q to quit.")
-
     try:
         # Attach before the first turn so even the initial ``-s`` processing is
         # logged as it happens.

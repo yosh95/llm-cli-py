@@ -1,8 +1,7 @@
-"""Tests for configuration (env vars)."""
-
-from __future__ import annotations
+"""Tests for configuration (env var names and defaults)."""
 
 from llm_cli_py.consts import (
+    DEFAULT_API_URL,
     ENV_API_KEY,
     ENV_API_URL,
     ENV_CHAT_LOG_APPEND,
@@ -11,12 +10,14 @@ from llm_cli_py.consts import (
 )
 
 
-class TestConsts:
-    """Test constants and path functions."""
-
-    def test_env_var_names(self) -> None:
-        assert ENV_API_KEY == "LLM_CLI_API_KEY"
-        assert ENV_API_URL == "LLM_CLI_API_URL"
-        assert ENV_MODEL == "LLM_CLI_MODEL"
-        assert ENV_CHAT_LOG_FILE == "LLM_CLI_CHAT_LOG_FILE"
-        assert ENV_CHAT_LOG_APPEND == "LLM_CLI_CHAT_LOG_APPEND"
+def test_env_var_names_are_stable() -> None:
+    assert (ENV_API_KEY, ENV_API_URL, ENV_MODEL) == (
+        "LLM_CLI_API_KEY",
+        "LLM_CLI_API_URL",
+        "LLM_CLI_MODEL",
+    )
+    assert (ENV_CHAT_LOG_FILE, ENV_CHAT_LOG_APPEND) == (
+        "LLM_CLI_CHAT_LOG_FILE",
+        "LLM_CLI_CHAT_LOG_APPEND",
+    )
+    assert DEFAULT_API_URL.startswith("http")

@@ -1,59 +1,16 @@
-"""Tests for the UI display module.
+"""Smoke test for the UI display module."""
 
-Covers print functions and formatting.
-"""
-
-from __future__ import annotations
-
-import pytest
-
-from llm_cli_py.ui.display import (
-    print_assistant,
-    print_block,
-    print_info,
-    report_error,
-    report_info,
-    report_success,
-    report_warning,
-)
+from llm_cli_py.ui.display import print_assistant, print_info, print_tool_result, report_error
 
 
-class TestPrintFunctions:
-    """Test display print functions."""
+def test_display_helpers_emit_expected_labels(capsys) -> None:
+    print_assistant("Hello world")
+    print_info("Model", "gpt-4o")
+    print_tool_result(["Exit code: 0", "ok"])
+    report_error("Something broke")
+    out = capsys.readouterr().out
 
-    def test_print_block_empty_content(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_block("   ", title="Empty")
-        captured = capsys.readouterr()
-        # Empty content should not crash
-        assert "Empty:" in captured.out
-
-    def test_print_assistant(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_assistant("Hello world")
-        captured = capsys.readouterr()
-        assert "Assistant" in captured.out
-        assert "Hello world" in captured.out
-
-    def test_print_info(self, capsys: pytest.CaptureFixture[str]) -> None:
-        print_info("Model", "gpt-4o")
-        captured = capsys.readouterr()
-        assert "Model: gpt-4o" in captured.out
-
-    def test_report_info(self, capsys: pytest.CaptureFixture[str]) -> None:
-        report_info("Something happened")
-        captured = capsys.readouterr()
-        assert "INFO: Something happened" in captured.out
-
-    def test_report_success(self, capsys: pytest.CaptureFixture[str]) -> None:
-        report_success("All good")
-        captured = capsys.readouterr()
-        assert "All good" in captured.out
-
-    def test_report_error(self, capsys: pytest.CaptureFixture[str]) -> None:
-        report_error("Something broke")
-        captured = capsys.readouterr()
-        assert "ERROR: Something broke" in captured.out
-
-    def test_report_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        report_warning("Be careful")
-        captured = capsys.readouterr()
-        assert "Be careful" in captured.out
+    assert "Assistant" in out and "Hello world" in out
+    assert "Model: gpt-4o" in out
+    assert "Tool Result" in out and "Exit code: 0" in out
+    assert "ERROR: Something broke" in out

@@ -6,6 +6,7 @@ import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Literal
 
 
 class Role(StrEnum):
@@ -24,7 +25,6 @@ class Message:
     role: Role
     content: str
     tool_call_id: str | None = None
-    name: str | None = None
     tool_calls: list[dict[str, object]] | None = None
     """Tool calls data (for assistant messages)."""
     timestamp: str | None = None
@@ -36,12 +36,16 @@ class Message:
     """
 
 
+SourceType = Literal["text", "file", "url"]
+"""Kind of input a :class:`DataSource` holds."""
+
+
 @dataclass
 class DataSource:
     """Represents a data input (text, file content, URL result)."""
 
     text: str
-    source_type: str = "text"  # text, file, url
+    source_type: SourceType = "text"
 
 
 @dataclass
@@ -50,7 +54,6 @@ class LlmResponse:
 
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
-    finish_reason: str | None = None
 
 
 @dataclass
@@ -60,6 +63,13 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, object]
+    parse_error: str | None = None
+    """Raw (unparseable) arguments string when the streamed JSON was truncated.
+
+    Set by the provider when the buffered ``arguments`` fragments never formed
+    valid JSON; such a call must not be executed (see
+    :meth:`ActiveSession.process_and_print`).
+    """
 
 
 @dataclass

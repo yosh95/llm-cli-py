@@ -2,43 +2,82 @@
 
 **Unified OpenAI-Compatible CLI for AI Agents (Python Edition)**
 
-A command-line interface for interacting with any OpenAI-compatible LLM API, with built-in tool support for Python execution.
+A small command-line client for any OpenAI-compatible LLM API, with streaming
+output and a built-in Python-execution tool.
 
 ## Features
 
-- **OpenAI-Compatible API** — Works with any provider that supports the `/chat/completions` endpoint (OpenAI, local instances, etc.)
-- **Python Execution** — Built-in `execute_python` tool for running Python code
-- **Extensible by Design** — Web search, image generation (via an image-generation LLM API with a key passed as an env var), and more run through `execute_python`, with endpoints/keys supplied via `LLM_CLI_SYSTEM_PROMPT` (no provider lock-in)
-- **Interactive Session** — Persistent chat with history and slash commands
-- **Automatic Tool Execution** — Tools run automatically without asking for user confirmation
-- **Markdown Rendering** — CJK-friendly Markdown output with Rich
+- **OpenAI-compatible** — works with any provider exposing `/chat/completions`
+  (OpenAI, local servers, …)
+- **Python execution** — one built-in tool, `execute_python`, which everything
+  else (web search, file work, data analysis, …) is built on
+- **No provider lock-in** — capabilities are described in `LLM_CLI_SYSTEM_PROMPT`,
+  so the agent calls APIs itself via `execute_python`; switch providers by
+  editing an env var
+- **Interactive session** — persistent chat with history and slash commands
+- **Always streaming** — answer tokens are rendered live as they arrive
 
-## Design Philosophy
-
-This CLI ships **one tool only**: `execute_python`.
-
-- **Self-contained by construction** — The tool itself is written in Python, so
-  Python is guaranteed to exist in the user's environment. `execute_python` is
-  the single primitive everything else is built on.
-- **One tool is enough** — Web search, image generation (calling an
-  image-generation LLM API with a key passed via an environment variable), HTTP
-  requests, file processing, data analysis, and more were all verified to work
-  through `execute_python` alone (e.g., in CyberGym-style security testing) before it
-  became the only tool.
-- **No provider lock-in** — Instead of bundling a dedicated web-search tool tied
-  to one provider, capability information (endpoint, request shape, API key
-  location) is injected through `LLM_CLI_SYSTEM_PROMPT`. The agent then performs
-  the call itself via `execute_python`. Switching search providers means editing
-  one environment variable — never the tool.
-
-### Example: Web Search via the System Prompt
-
-Put brief usage notes for your search API into `LLM_CLI_SYSTEM_PROMPT`; the
-agent calls it from `execute_python` (shown here with the Ollama Web Search
-API — any provider works the same way):
+## Install
 
 ```bash
-export WEB_SEARCH_API_KEY="sk-..."   # the actual key stays in a normal env var
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+Or, without activating anything:
+
+```bash
+make install        # installs into .venv
+make install-dev    # .venv + dev tools (pytest, ruff)
+pipx install -e .   # global, independent of .venv
+```
+
+On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
+(`sudo apt install python3-venv`).
+
+## Usage
+
+```bash
+export LLM_CLI_API_URL="http://localhost:11434/v1"   # any OpenAI-compatible endpoint
+export LLM_CLI_API_KEY="your-api-key"                # optional for local instances
+export LLM_CLI_MODEL="gpt-4o"                        # optional, or use -m
+
+llm-cli-py -m gpt-4o "What is the capital of France?"   # one-shot
+llm-cli-py -m gpt-4o -s README.md "Summarize this file" # with file/URL input
+llm-cli-py -m gpt-4o                                   # interactive
+llm-cli-py models                                      # list models
+```
+
+### Slash Commands (Interactive Mode)
+
+| Command | Description |
+|---|---|
+| `/help`, `/h` | Show help |
+| `/info`, `/i` | Show session info |
+| `/dump` | Dump conversation as TOML |
+| `/quit`, `/q`, `/exit` | Exit session |
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API. Default: `http://localhost:11434/v1` |
+| `LLM_CLI_API_KEY` | API key (optional for local instances). Overridden by `--api-key`. |
+| `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
+| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
+| `LLM_CLI_PROMPT_HISTORY_FILE` | File to persist prompt input history across runs. |
+| `LLM_CLI_CHAT_LOG_FILE` | File to write the conversation to (same as `/dump`, flushed after every message). |
+| `LLM_CLI_CHAT_LOG_APPEND` | `1`/`true`/`yes`/`on` to append new messages instead of rewriting the file. |
+| `LOG_LEVEL` | Root logger level (e.g. `DEBUG`, `INFO`). |
+| `DEBUG_HTTP` | `1`/`true` for raw HTTP request/response debugging. |
+
+### Example: Web Search Without a Search Tool
+
+Describe the API in `LLM_CLI_SYSTEM_PROMPT` and the agent calls it itself:
+
+```bash
+export WEB_SEARCH_API_KEY="sk-..."
 export LLM_CLI_SYSTEM_PROMPT='You are a helpful coding agent.
 When you need web search, call the API below from execute_python:
 - Endpoint: POST https://ollama.com/api/web_search
@@ -47,181 +86,29 @@ When you need web search, call the API below from execute_python:
 The key is available in the environment variable WEB_SEARCH_API_KEY.'
 ```
 
-Result: working web search with **no built-in search tool** and no dependency on
-a specific provider — changing providers is just a prompt edit.
-
-> Note: `LLM_CLI_SYSTEM_PROMPT` appears in `/dump` and the chat log, so prefer
-> referencing the key by env var name (as above) over pasting the key itself
-> into the prompt.
-
-## Quick Start
-
-```bash
-# Install
-uv sync
-
-# Set environment variables
-export LLM_CLI_API_URL="http://localhost:11434/v1"   # or any OpenAI-compatible endpoint
-export LLM_CLI_API_KEY="your-api-key"                 # optional for local instances
-export LLM_CLI_MODEL="gpt-4o"                         # optional, can use -m flag
-
-# Run
-uv run llm-cli-py -m gpt-4o
-```
-
-## Environment Variables
-
-| Variable | Description |
-|---|---|
-| `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API (e.g. `http://localhost:11434/v1`). Default: `http://localhost:11434/v1` |
-| `LLM_CLI_API_KEY` | API key for the LLM endpoint. Optional for local instances. Can be overridden with `--api-key`. |
-| `LLM_CLI_MODEL` | Default model to use (e.g. `gpt-4o`). Can be overridden with `-m`. |
-| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read **once at startup** and seeded as the first conversation message. Mid-session env changes are not picked up. When unset or empty, no system prompt is sent (no default/date prompt is injected). Appears in `/dump` and the chat log. Can also carry capability notes (e.g., a web search endpoint + API key reference) that let the agent extend itself via `execute_python` — see [Design Philosophy](#design-philosophy). |
-| `LOG_LEVEL` | Set the root logger level (e.g. `DEBUG`, `INFO`). |
-| `DEBUG_HTTP` | Set to `1`/`true` to enable raw HTTP request/response debugging. |
-| `LLM_CLI_PROMPT_HISTORY_FILE` | Path to persist the interactive prompt input history across invocations. If unset, prompt history is kept only in memory for the current run. |
-| `LLM_CLI_CHAT_LOG_FILE` | Path to write the conversation (same content as `/dump`, including timestamps) to. It is written **after every message**, not only at exit, so the log survives a crash / `kill` / power loss. If unset, the conversation is not saved to disk. |
-| `LLM_CLI_CHAT_LOG_APPEND` | Set to `1`/`true`/`yes`/`on` to append only the newly added messages as `[[message]]` tables instead of rewriting the whole file. Earlier sessions stay in the same file (remains valid TOML overall) — handy with a per-day file name. |
-
-## Usage
-
-Commands below assume the CLI is on your PATH (e.g. after `uv sync`, prefix
-them with `uv run`, or activate the venv with `source .venv/bin/activate`).
-
-```bash
-# One-shot query
-llm-cli-py -m gpt-4o "What is the capital of France?"
-
-# With file input
-llm-cli-py -m gpt-4o -s README.md "Summarize this file"
-
-# Interactive mode
-llm-cli-py -m gpt-4o
-
-# List available models
-llm-cli-py models
-
-# Override API URL and API key on the command line
-llm-cli-py --api-url https://api.example.com/v1 --api-key sk-your-key -m gpt-4o
-```
-
-### Slash Commands (Interactive Mode)
-
-| Command | Description |
-|---|---|
-| `/help`, `/h` | Show help |
-| `/quit`, `/q`, `/exit` | Exit session |
-| `/info`, `/i` | Show session info |
-| `/dump` | Dump conversation as TOML |
-
-## Interactive Input
-
-The interactive session uses `prompt_toolkit`, which provides history,
-completion, and multiline editing. The `PromptSession` is created exactly once
-and used by the main chat loop, so
-prompt_toolkit's terminal handling (raw mode, alternate screen buffer, its own
-event loop) is initialized only once and never conflicts with itself.
-
-- **Prompt history** — When `LLM_CLI_PROMPT_HISTORY_FILE` is set, your prompt
-  input history is persisted to that file across invocations. If it is unset,
-  history lives only in memory for the current run.
-- **Session log** — When `LLM_CLI_CHAT_LOG_FILE` is set, the conversation (the
-  same content as the `/dump` command) is written to that file **as the session
-  runs**: the log is flushed after every message that enters the history (user
-  turn, assistant answer, tool result) — the user's turn is even flushed
-  *before* the request is sent — so an abrupt end (crash, `kill -9`, power loss)
-  still leaves everything up to that point on disk. The file is replaced
-  atomically (temp file + rename), so a reader never sees a half-written log.
-  If the env var is unset, nothing is saved.
-
-### Conversation timestamps
-
-Every message carries a local ISO 8601 timestamp (`Message.timestamp`, e.g.
-`2026-09-16T12:34:56+09:00`), shown in `/dump` and in the chat log:
-
-```toml
-[[message]]
-role = "user"
-content = "What is the capital of France?"
-timestamp = "2026-09-16T12:34:56+09:00"
-
-[[message]]
-role = "assistant"
-content = "Paris."
-timestamp = "2026-09-16T12:34:58+09:00"
-```
-
-Timestamps are **local metadata only**: they are recorded when the message is
-added to the history, and they are deliberately stripped out of the API request
-(`_build_messages` emits only `role` / `content` / `tool_calls` / `tool_call_id`),
-so they never reach the model and cannot change what is sent or billed.
-
-## Streaming
-
-The CLI always requests responses in streaming mode (`stream: true`). Answer
-tokens are rendered live as they arrive.
-
-- **Answer** tokens stream under an `Assistant:` heading.
-- **Tool calls** are buffered across chunks and only executed once their
-  arguments are complete. If a provider emits a broken/truncated tool-call
-  argument chunk, the call is surfaced with an explicit error and the turn
-  exits (no silent non-streaming re-request).
+Prefer referencing the key by env var name (as above) — the prompt appears in
+`/dump` and the chat log.
 
 ## Tools
 
-1. **`execute_python`** — Execute Python code in a sandboxed subprocess
-
-   This is the only tool **by design** — everything else is built on top of it
-   (see [Design Philosophy](#design-philosophy)).
-
-## Tool Call Approval
-
-Tool calls are **always executed automatically** without prompting the user for
-confirmation. There is no manual/auto mode and no human-in-the-loop approval.
-
-## Tool Display
-
-When a tool runs, the CLI shows a one-line indicator
-(`🔨 Executing tool: <name>...`), the tool parameters, then the tool result.
-A horizontal rule (`─`) is drawn before the result block so the tool call and
-its result are easy to tell apart:
-
-- **Call** — `🔨 Executing tool: <name>...` followed by parameters.
-- **Result** — a `───` rule, then the `Tool Result:` block.
-
-Parameter and result display per tool:
-
-- **`execute_python`** — the full `code` parameter is shown, and the result
-  block includes the exit code plus stdout/stderr.
-- Other tools show no parameters by default (result block still printed).
+`execute_python` is the only tool, by design: it runs Python code in a sandboxed
+subprocess and returns the exit code plus stdout/stderr. Tool calls are always
+executed automatically (no approval prompt).
 
 ## Development
 
 ```bash
-# Install dev dependencies
-uv sync --group dev
-
-# Run tests
-uv run pytest
-
-# Lint
-uv run ruff check src
+make install-dev   # create .venv + pip install -e ".[dev]"
+make test          # pytest -v
+make check         # ruff check
+make format        # ruff format
 ```
 
-### Dependency management
+Dependencies live in `pyproject.toml` (runtime under `[project] dependencies`,
+dev tools under the `dev` extra). There is no lock file: edit the lists and run
+`python -m pip install -e ".[dev]"`. For reproducible installs, pin exact
+versions with `==`.
 
-`uv.lock` is committed to the repo and must be regenerated by uv, never edited
-by hand:
+## License
 
-```bash
-# Add / remove a dependency (updates pyproject.toml and uv.lock together)
-uv add --group dev <package>
-uv remove --group dev <package>
-
-# Upgrade locked versions to the latest allowed by pyproject.toml
-uv lock --upgrade && uv sync                       # all packages
-uv lock --upgrade-package <name> && uv sync        # a single package
-```
-
-If `pyproject.toml` was edited directly, re-lock with `uv lock` (or just run
-`uv sync`).
+Apache-2.0

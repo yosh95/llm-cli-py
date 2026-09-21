@@ -1,207 +1,97 @@
-"""Tests for streaming chat completions (SSE parsing and send())."""
+"""Tests for SSE parsing and the streaming send() path."""
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from llm_cli_py.models import DataSource
-from llm_cli_py.providers.llm_api import LlmApiClient
+from tests.conftest import make_client, sse_chunk, stream_response, text_stream, tool_call_chunk
 
 
-def _chunk(delta: dict[str, object], finish_reason: str | None = None) -> str:
-    """Build a single SSE data line from a delta dict."""
-    return json.dumps({"choices": [{"delta": delta, "finish_reason": finish_reason}]})
+def test_text_stream_is_accumulated_and_streamed_live() -> None:
+    client = make_client()
+    chunks = [_sse for _sse in text_stream("Hello ", "world")]
+    deltas: list[str] = []
+    result = client._parse_stream_response(stream_response(chunks), on_text=deltas.append)
+
+    assert result.text == "Hello world"
+    assert deltas == ["Hello ", "world"]
+    assert result.tool_calls == []
 
 
-def _make_stream_response(chunks: list[str]) -> MagicMock:
-    """Build a mock requests.Response that yields SSE data lines."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.iter_lines.return_value = [c.encode("utf-8") for c in chunks]
-    return resp
+def test_tool_call_arguments_are_buffered_across_chunks() -> None:
+    client = make_client()
+    resp = stream_response(
+        [
+            tool_call_chunk('{"code": "pri'),
+            tool_call_chunk('nt(1)"}'),
+            sse_chunk({}, finish_reason="tool_calls"),
+            "data: [DONE]",
+        ]
+    )
+    result = client._parse_stream_response(resp)
+    assert [(tc.id, tc.name, tc.arguments, tc.parse_error) for tc in result.tool_calls] == [
+        ("call_1", "python", {"code": "print(1)"}, None)
+    ]
 
 
-class TestParseStreamResponse:
-    """Test the SSE chunk parser."""
-
-    def test_text_stream(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        resp = _make_stream_response(
-            [
-                _chunk({"content": "Hello "}),
-                _chunk({"content": "world"}),
-                _chunk({}, finish_reason="stop"),
-                "data: [DONE]",
-            ]
-        )
-        text_parts: list[str] = []
-        result = client._parse_stream_response(resp, on_text=text_parts.append)
-        assert result.text == "Hello world"
-        assert result.finish_reason == "stop"
-        assert result.tool_calls == []
-        assert text_parts == ["Hello ", "world"]
-
-    def test_tool_call_arguments_buffered_and_parsed(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        # arguments split across chunks as JSON fragments
-        resp = _make_stream_response(
-            [
-                _chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "python", "arguments": '{"code": "pri'},
-                            }
-                        ]
-                    }
-                ),
-                _chunk({"tool_calls": [{"index": 0, "function": {"arguments": 'nt(1)"}'}}]}),
-                _chunk({}, finish_reason="tool_calls"),
-                "data: [DONE]",
-            ]
-        )
-        result = client._parse_stream_response(resp)
-        assert len(result.tool_calls) == 1
-        tc = result.tool_calls[0]
-        assert tc.id == "call_1"
-        assert tc.name == "python"
-        assert tc.arguments == {"code": "print(1)"}
-        assert result.finish_reason == "tool_calls"
-
-    def test_broken_tool_call_arguments_fall_back_to_raw(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        # arguments never complete to valid JSON
-        resp = _make_stream_response(
-            [
-                _chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "python", "arguments": '{"code": "pri'},
-                            }
-                        ]
-                    }
-                ),
-                _chunk({}, finish_reason="tool_calls"),
-                "data: [DONE]",
-            ]
-        )
-        result = client._parse_stream_response(resp)
-        assert len(result.tool_calls) == 1
-        tc = result.tool_calls[0]
-        assert isinstance(tc.arguments, dict)
-        assert "raw" in tc.arguments
+def test_truncated_tool_call_sets_parse_error_and_empty_arguments() -> None:
+    client = make_client()
+    result = client._parse_stream_response(
+        stream_response([tool_call_chunk('{"code": "pri'), "data: [DONE]"])
+    )
+    (tc,) = result.tool_calls
+    assert tc.arguments == {}
+    assert tc.parse_error == '{"code": "pri'
 
 
-class TestSendStreaming:
-    """Test send() in streaming mode, including the fallback."""
+def test_send_requests_a_stream_and_records_the_answer(monkeypatch) -> None:
+    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
+    client = make_client()
+    with patch(
+        "llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_response(text_stream("Hi"))
+    ) as post:
+        result = client.send([DataSource(text="Hello")], [])
 
-    def test_send_streaming_requests_stream_true(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        stream_resp = _make_stream_response(
-            [
-                _chunk({"content": "Hi"}),
-                _chunk({}, finish_reason="stop"),
-                "data: [DONE]",
-            ]
-        )
-        stream_resp.json.return_value = {"choices": [{"message": {"content": "Hi"}}]}
-        stream_resp.status_code = 200
+    assert post.call_args[0][2]["stream"] is True
+    assert result.text == "Hi"
+    assert [m.role.value for m in client.state.conversation] == ["user", "assistant"]
 
-        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp) as mock_post:
-            result = client.send([DataSource(text="Hello")], [])
 
-        # post_with_retries(session, url, json_body, timeout)
-        json_body = mock_post.call_args[0][2]
-        assert json_body["stream"] is True
-        assert result.text == "Hi"
-        assert client._state.conversation[-1].content == "Hi"
+def test_send_notifies_state_change_once_per_message(monkeypatch) -> None:
+    """The client signals history changes so the log can be flushed per message."""
+    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
+    client = make_client()
+    counts: list[int] = []
+    client.state.on_change = lambda: counts.append(len(client.state.conversation))
 
-    def test_send_notifies_state_change_per_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The client signals history changes so the log can be flushed per message."""
-        # Keep the history deterministic: no system message is seeded.
-        monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        counts: list[int] = []
-        client.state.on_change = lambda: counts.append(len(client.state.conversation))
-        stream_resp = _make_stream_response(
-            [
-                _chunk({"content": "Hi"}),
-                _chunk({}, finish_reason="stop"),
-                "data: [DONE]",
-            ]
-        )
-        stream_resp.status_code = 200
+    with patch(
+        "llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_response(text_stream("Hi"))
+    ):
+        client.send([DataSource(text="Hello")], [])
 
-        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp):
-            client.send([DataSource(text="Hello")], [])
+    assert counts == [1, 2]  # user turn (before the request), then the answer
 
-        # Once for the user turn (before the request) and once for the answer.
-        assert counts == [1, 2]
-        assert client.state.conversation[-1].timestamp is not None
 
-    def test_send_streaming_tool_call_success(self) -> None:
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        stream_resp = _make_stream_response(
-            [
-                _chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "python", "arguments": '{"code": "print(1)"}'},
-                            }
-                        ]
-                    }
-                ),
-                _chunk({}, finish_reason="tool_calls"),
-                "data: [DONE]",
-            ]
-        )
-        stream_resp.status_code = 200
+@pytest.mark.parametrize(
+    ("arguments", "expect_raw"),
+    [
+        ('{"code": "print(1)"}', False),
+        ('{"code": "pri', True),
+    ],
+)
+def test_send_surfaces_tool_calls_without_a_second_request(arguments: str, expect_raw: bool) -> None:
+    """Exactly one request is made; broken calls are returned, never retried non-streaming."""
+    client = make_client()
+    resp = stream_response(
+        [tool_call_chunk(arguments), sse_chunk({}, finish_reason="tool_calls"), "data: [DONE]"]
+    )
 
-        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_resp):
-            result = client.send([DataSource(text="Run it")], [])
+    with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=resp) as post:
+        result = client.send([DataSource(text="Run it")], [])
 
-        assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].name == "python"
-        assert result.tool_calls[0].arguments == {"code": "print(1)"}
-
-    def test_send_streaming_broken_tool_call_returned_without_fallback(self) -> None:
-        """Broken tool calls are returned as-is (no non-streaming fallback)."""
-        client = LlmApiClient("m", "https://api.example.com/v1", "k")
-        broken_stream = _make_stream_response(
-            [
-                _chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "call_1",
-                                "function": {"name": "python", "arguments": '{"code": "pri'},
-                            }
-                        ]
-                    }
-                ),
-                _chunk({}, finish_reason="tool_calls"),
-                "data: [DONE]",
-            ]
-        )
-        broken_stream.status_code = 200
-
-        with patch("llm_cli_py.providers.llm_api.post_with_retries", return_value=broken_stream) as mock_post:
-            result = client.send([DataSource(text="Run it")], [])
-
-        # Exactly one request, and the broken call is surfaced for the caller.
-        assert mock_post.call_count == 1
-        assert mock_post.call_args_list[0][0][2]["stream"] is True
-        assert len(result.tool_calls) == 1
-        assert result.tool_calls[0].arguments == {"raw": '{"code": "pri'}
+    assert post.call_count == 1
+    (tc,) = result.tool_calls
+    assert (tc.parse_error is not None) is expect_raw

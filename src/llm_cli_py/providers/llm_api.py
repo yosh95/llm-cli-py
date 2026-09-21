@@ -119,17 +119,16 @@ class LlmApiClient(LlmClient):
 
         return body
 
-    def _parse_stream_chunk(self, chunk: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _parse_stream_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
         """Parse a single streaming ``choices[0].delta`` chunk.
 
-        Returns a dict with the delta fields (``content``, ``tool_calls``)
-        plus ``finish_reason``.
+        Returns a dict with the delta fields (``content``, ``tool_calls``).
         """
         choices = chunk.get("choices") or []
         if not choices:
             return {}
-        choice = choices[0]
-        delta = choice.get("delta") or {}
+        delta = choices[0].get("delta") or {}
         parsed: dict[str, Any] = {}
         content = delta.get("content")
         if content:
@@ -137,7 +136,6 @@ class LlmApiClient(LlmClient):
         tc = delta.get("tool_calls")
         if tc:
             parsed["tool_calls"] = tc
-        parsed["finish_reason"] = choice.get("finish_reason")
         return parsed
 
     def _parse_stream_response(
@@ -150,14 +148,13 @@ class LlmApiClient(LlmClient):
         - Text deltas are printed via ``on_text`` as they arrive (live).
         - Tool-call arguments are buffered per ``index`` and only executed
           after the whole call is complete. If a buffered ``arguments`` string
-          does not parse as JSON (broken/malformed chunk), a ``ToolCall`` with
-          ``{"raw": ...}`` arguments is returned so the caller can fall back.
+          does not parse as JSON (broken/malformed chunk), the ``ToolCall`` is
+          returned with ``parse_error`` set and empty ``arguments``.
 
         Returns an :class:`LlmResponse` with the fully accumulated result.
         """
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, Any]] = {}
-        finish_reason: str | None = None
 
         for raw_line_bytes in response.iter_lines():
             if not raw_line_bytes:
@@ -182,11 +179,6 @@ class LlmApiClient(LlmClient):
             delta = self._parse_stream_chunk(chunk)
             if not delta:
                 continue
-
-            if delta.get("finish_reason"):
-                # Keep the raw finish_reason ("tool_calls" means the model
-                # asked for a tool and the loop must continue).
-                finish_reason = delta["finish_reason"]
 
             content = delta.get("content")
             if content:
@@ -213,26 +205,24 @@ class LlmApiClient(LlmClient):
         for index in sorted(tool_calls_map):
             entry = tool_calls_map[index]
             args_raw = entry["arguments"]
+            parse_error: str | None = None
             try:
-                arguments: Any = json.loads(args_raw) if args_raw else {}
+                arguments: dict[str, Any] = json.loads(args_raw) if args_raw else {}
             except json.JSONDecodeError:
-                # Malformed / truncated chunk. Keep the raw string so the
-                # caller can surface the failure.
-                arguments = {"raw": args_raw}
+                # Malformed / truncated chunk: never executable, so surface it
+                # via parse_error instead of guessing at arguments.
+                arguments = {}
+                parse_error = args_raw
             tool_calls.append(
                 ToolCall(
                     id=entry["id"] or f"call_{index}",
                     name=entry["name"],
                     arguments=arguments,
+                    parse_error=parse_error,
                 )
             )
 
-        result = LlmResponse(
-            text="".join(text_parts) or None,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-        )
-        return result
+        return LlmResponse(text="".join(text_parts) or None, tool_calls=tool_calls)
 
     def _append_user_messages(self, data: list[DataSource]) -> None:
         """Append user messages from ``data`` to the conversation state."""
@@ -297,9 +287,9 @@ class LlmApiClient(LlmClient):
         Returns:
             An :class:`LlmResponse`. Tool-call arguments are buffered until
             complete. If a streamed tool call does not parse as JSON (broken
-            chunks), a :class:`ToolCall` whose ``arguments`` is ``{"raw": ...}``
-            is returned as-is; the caller is responsible for surfacing the
-            failure (no silent non-streaming fallback).
+            chunks), its ``ToolCall.parse_error`` is set and ``arguments`` is
+            empty; the caller is responsible for surfacing the failure (no
+            silent non-streaming fallback).
         """
         self._append_user_messages(data)
         # The user's turn is now in the history: flush it to the chat log right

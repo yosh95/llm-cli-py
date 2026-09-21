@@ -58,4 +58,4 @@ class LlmClient(ABC):
     @property
     def api_url(self) -> str:
         """Return the API base URL this client connects to."""
-        return ""
+        raise NotImplementedError

@@ -21,16 +21,11 @@ class Tool:
         func: ToolFunc,
     ) -> None:
         self.name = name
-        self.description = description
-        self.parameters = parameters
         self.func = func
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name=self.name,
-            description=self.description,
-            parameters=self.parameters,
+        self.schema = ToolSchema(
+            name=name,
+            description=description,
+            parameters=parameters,
         )
 
 
@@ -61,17 +56,6 @@ class ToolRegistry:
         """Get a tool by name."""
         return self._tools.get(name)
 
-    def remove(self, name: str) -> None:
-        """Remove a registered tool by name.
-
-        Raises KeyError if the tool is not registered.
-        """
-        del self._tools[name]
-
-    def clear(self) -> None:
-        """Remove all registered tools."""
-        self._tools.clear()
-
     def get_schemas(self) -> list[ToolSchema]:
         """Get all tool schemas for API requests."""
         return [t.schema for t in self._tools.values()]
@@ -82,7 +66,3 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
-
-    def __len__(self) -> int:
-        """Return the number of registered tools."""
-        return len(self._tools)

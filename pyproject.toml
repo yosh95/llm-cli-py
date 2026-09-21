@@ -28,6 +28,12 @@ dependencies = [
     "tomli-w",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
 [project.scripts]
 llm-cli-py = "llm_cli_py.main:main"
 
@@ -44,16 +50,6 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]
 [tool.ruff.format]
 quote-style = "double"
 
-[dependency-groups]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "ruff",
-]
-
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-
-[tool.uv]
-link-mode = "copy"
