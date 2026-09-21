@@ -51,5 +51,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]
 quote-style = "double"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "." lets the tests import shared helpers from tests/conftest.py as a module
+# path ("tests.conftest") regardless of the working directory.
+pythonpath = [".", "src"]
 testpaths = ["tests"]
