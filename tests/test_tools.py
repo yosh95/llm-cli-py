@@ -2,10 +2,32 @@
 
 from __future__ import annotations
 
+import os
+import signal
+import threading
+import time
+from pathlib import Path
+
 import pytest
 
 from llm_cli_py.tools.python_exec import execute_python
 from llm_cli_py.tools.types import ExecResult, ToolError
+
+
+def _signal_main_thread_when_ready(marker: Path, timeout: float) -> None:
+    """Wait for ``marker``, then interrupt the main thread like Ctrl+C does.
+
+    ``signal.pthread_kill`` addresses the main thread specifically: that is where
+    the code under test blocks in ``proc.communicate()``, i.e. exactly where a
+    terminal Ctrl+C lands. Signalling later would only be noticed once the
+    blocking wait returned on its own.
+    """
+    deadline = time.monotonic() + timeout
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    main_thread = threading.main_thread()
+    if main_thread.ident is not None:
+        signal.pthread_kill(main_thread.ident, signal.SIGINT)
 
 
 class TestExecutePython:
@@ -33,6 +55,37 @@ class TestExecutePython:
         result = execute_python(code)
         assert result.exit_code == 1
         assert needle in result.stderr
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX signal semantics")
+    def test_ctrl_c_kills_child_and_its_descendants(self, tmp_path: Path) -> None:
+        """Ctrl+C must not leave the executed code (or its children) running.
+
+        The code spawns a process, records its pid, then sleeps. The interrupt
+        is delivered while the tool is waiting, and afterwards both the code and
+        the process it spawned must be gone.
+        """
+        marker = tmp_path / "grandchild.pid"
+        code = (
+            "import subprocess, sys, time\n"
+            "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            f"print(p.pid, flush=True)\n"
+            f"open({str(marker)!r}, 'w').write(str(p.pid))\n"
+            "time.sleep(60)\n"
+        )
+        watcher = threading.Thread(target=_signal_main_thread_when_ready, args=(marker, 15.0), daemon=True)
+        watcher.start()
+
+        with pytest.raises(KeyboardInterrupt):
+            execute_python(code)
+        watcher.join(timeout=5)
+
+        assert marker.exists(), "the executed code never started its child"
+        grandchild_pid = int(marker.read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
+        time.sleep(0.3)  # a doomed process would be gone by now
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
 
     def test_dangerous_subprocess_pattern_is_refused(self) -> None:
         result = execute_python('subprocess.run(["cmd", "2>&1"], shell=True)')

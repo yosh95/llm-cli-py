@@ -91,9 +91,12 @@ Prefer referencing the key by env var name (as above) — the prompt appears in
 
 ## Tools
 
-`execute_python` is the only tool, by design: it runs Python code in a sandboxed
+`execute_python` is the only tool, by design: it runs Python code in a
 subprocess and returns the exit code plus stdout/stderr. Tool calls are always
-executed automatically (no approval prompt).
+executed automatically (no approval prompt). The child runs with the same
+environment and file-system access as the CLI itself, and runs without a
+timeout: interrupt it with Ctrl+C, which kills the code and everything it
+spawned.
 
 ## Development
 

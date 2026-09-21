@@ -50,7 +50,7 @@ def test_tool_arguments_and_result_are_displayed(session: ActiveSession, turn) -
     register(session.ctx.tool_registry, "calc")
     out = turn(tool_then_text(ToolCall(id="c1", name="calc", arguments={"code": "print(1)"})))
     assert "Executing tool: calc" in out
-    assert "    code=print(1)" in out  # rendered as its own indented line
+    assert "  [code] print(1)" in out  # rendered under its Args label
     assert "Exit code: 0" in out  # the ExecResult is rendered
 
 
@@ -104,13 +104,20 @@ def test_broken_tool_calls_are_dropped_from_history(session: ActiveSession) -> N
 
 def test_tool_arguments_formatting() -> None:
     assert ActiveSession._format_tool_arguments({}) is None
-    assert ActiveSession._format_tool_arguments({"a": 1, "b": "x"}) == ["    a=1", "    b=x"]
+    assert ActiveSession._format_tool_arguments({"a": 1, "b": "x"}) == ["  [a] 1", "  [b] x"]
 
 
 def test_multiline_code_argument_keeps_its_indentation() -> None:
     """Multi-line code is shown verbatim on its own lines, not inlined."""
     lines = ActiveSession._format_tool_arguments({"code": "def run(cmd):\n    print(cmd)\nrun(1)"})
-    assert lines == ['    code="""', "    def run(cmd):", "        print(cmd)", "    run(1)", '    """']
+    assert lines == ["  [code]", "    def run(cmd):", "        print(cmd)", "    run(1)"]
+
+
+def test_trailing_newline_does_not_add_an_empty_display_line() -> None:
+    """Code written with a trailing newline ends on its last real line."""
+    assert ActiveSession._format_tool_arguments({"code": "print(1)\n"}) == ["  [code] print(1)"]
+    lines = ActiveSession._format_tool_arguments({"code": "def run():\n    print(1)\n"})
+    assert lines == ["  [code]", "    def run():", "        print(1)"]
 
 
 def test_multiline_tool_arguments_are_printed_verbatim(session: ActiveSession, turn) -> None:
@@ -119,7 +126,7 @@ def test_multiline_tool_arguments_are_printed_verbatim(session: ActiveSession, t
     out = turn(tool_then_text(ToolCall(id="c1", name="run", arguments={"code": code})))
     assert "    subprocess.run(cmd, shell=True)" in out
     assert "code=import subprocess" not in out  # not flattened onto one line
-    assert "Args" not in out  # no more inline ``Args: ...`` line
+    assert out.index("Args:") < out.index("[code]")  # header opens the argument block
 
 
 def test_auto_execution_has_no_approval_prompt(session: ActiveSession, turn) -> None:

@@ -1,6 +1,9 @@
 """Python execution tool - runs Python code in a subprocess."""
 
 import ast
+import contextlib
+import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -67,18 +70,46 @@ def _check_dangerous_subprocess(code: str) -> str | None:
     return c.error
 
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the child process and every process it spawned.
+
+    ``proc`` was started with ``start_new_session=True``, so its pid is also the
+    id of its own process group: one ``killpg`` takes down the child and all of
+    its descendants. The direct child is signalled as well, in case it left the
+    group (for example by calling ``setsid()`` itself). Failures are ignored --
+    the process may already be gone.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:
+        pgid = proc.pid
+    for target, kill in ((pgid, os.killpg), (proc.pid, os.kill)):
+        with contextlib.suppress(OSError):
+            kill(target, signal.SIGKILL)
+
+
 def execute_python(
     code: str,
 ) -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
-    Runs without a timeout; the user can interrupt with Ctrl+C.
+    The child is started in its own session (``start_new_session=True``), so a
+    Ctrl+C in the terminal is *not* delivered to the code being run -- it would
+    otherwise never stop on its own. On ``KeyboardInterrupt`` the child's whole
+    process group is killed first (the code plus everything it spawned) and the
+    interrupt is then re-raised, so the prompt comes back with nothing left
+    running in the background.
+
+    Runs without a timeout by design; the user interrupts with Ctrl+C.
 
     Args:
         code: The Python code to execute.
 
     Returns:
         ExecResult on completion, ToolError on failure.
+
+    Raises:
+        KeyboardInterrupt: If the user interrupts the execution (Ctrl+C).
     """
     # Static check: detect dangerous subprocess patterns
     danger = _check_dangerous_subprocess(code)
@@ -89,18 +120,31 @@ def execute_python(
         tmp_path = Path(tmp.name)
         tmp.write(code)
 
+    proc: subprocess.Popen[str] | None = None
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, str(tmp_path)],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            # Own session = own process group. The terminal's Ctrl+C therefore
+            # skips the executed code, which is killed explicitly below instead.
+            start_new_session=True,
         )
-        return ExecResult(
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
+        stdout, stderr = proc.communicate()
+        return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
+    except KeyboardInterrupt:
+        # Kill the child and everything it spawned, reap it, then let the
+        # interrupt continue to the caller (the session loop prints its usual
+        # "Use /quit to exit" notice and returns to the prompt).
+        if proc is not None and proc.poll() is None:
+            _kill_process_group(proc)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=5)
+        raise
     except Exception as e:
+        if proc is not None and proc.poll() is None:
+            _kill_process_group(proc)
         return ExecResult(
             stdout="",
             stderr=str(e),
@@ -123,4 +167,4 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
     "required": ["code"],
 }
 
-PYTHON_TOOL_DESCRIPTION = "Execute Python code in a sandboxed subprocess and return stdout/stderr."
+PYTHON_TOOL_DESCRIPTION = "Execute Python code in a subprocess and return stdout/stderr."

@@ -154,20 +154,23 @@ class ActiveSession:
     def _format_tool_argument(name: str, value: object) -> list[str]:
         """Format one tool-call argument as indented display lines.
 
-        Short values stay on a single ``name=value`` line so simple calls
+        Short values stay on a single ``[name] value`` line so simple calls
         read at a glance. Values that span several lines (``code`` being the
-        obvious case) are put on their own line and reproduced verbatim, so
-        the code keeps the indentation it was written with instead of being
-        mangled into one long line.
+        obvious case) get a ``[name]`` label of their own and are reproduced
+        verbatim underneath, so the code keeps the indentation it was written
+        with instead of being mangled into one long line. The caller prints
+        the ``Args:`` header that opens the block.
         """
         text = value if isinstance(value, str) else str(value)
-        lines = text.split("\n")
+        # Code is almost always written with a trailing newline; dropping it
+        # first keeps the block from ending on an empty indented line and lets
+        # one-line code stay on a single ``[name] value`` line.
+        lines = text.rstrip("\n").split("\n")
         if len(lines) == 1:
-            return [f"    {name}={value}"]
+            return [f"  [{name}] {lines[0]}"]
 
-        formatted = [f'    {name}="""']
+        formatted = [f"  [{name}]"]
         formatted.extend(f"    {line}" for line in lines)
-        formatted.append('    """')
         return formatted
 
     @classmethod

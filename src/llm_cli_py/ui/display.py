@@ -50,13 +50,17 @@ def stream_end() -> None:
 def print_tool_call(name: str, arg_lines: list[str]) -> None:
     """Print a tool invocation and its arguments.
 
-    The rule and the ``Executing tool: ...`` header open the block, then
-    each pre-formatted argument line is printed unchanged (the caller
-    indents them), so multi-line values such as code keep their own
-    internal indentation.
+    The rule and the ``Executing tool: ...`` header open the block. When the
+    call carries arguments, an ``Args:`` line follows them in as a header and
+    each pre-formatted argument line is printed unchanged (the caller labels
+    and indents them), so multi-line values such as code keep their own
+    internal indentation. A call without arguments prints no ``Args:`` block.
     """
     print_rule()
     print(f"\U0001f680 Executing tool: {name}...")
+    if not arg_lines:
+        return
+    print("Args:")
     for line in arg_lines:
         print(line)
 
