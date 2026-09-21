@@ -47,6 +47,20 @@ def stream_end() -> None:
     print("", flush=True)
 
 
+def print_tool_call(name: str, arg_lines: list[str]) -> None:
+    """Print a tool invocation and its arguments.
+
+    The rule and the ``Executing tool: ...`` header open the block, then
+    each pre-formatted argument line is printed unchanged (the caller
+    indents them), so multi-line values such as code keep their own
+    internal indentation.
+    """
+    print_rule()
+    print(f"\U0001f680 Executing tool: {name}...")
+    for line in arg_lines:
+        print(line)
+
+
 def print_tool_result(lines: list[str]) -> None:
     """Print the result of a tool execution.
 

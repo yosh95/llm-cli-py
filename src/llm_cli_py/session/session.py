@@ -151,11 +151,35 @@ class ActiveSession:
             break
 
     @staticmethod
-    def _format_tool_arguments(arguments: dict[str, object]) -> str | None:
+    def _format_tool_argument(name: str, value: object) -> list[str]:
+        """Format one tool-call argument as indented display lines.
+
+        Short values stay on a single ``name=value`` line so simple calls
+        read at a glance. Values that span several lines (``code`` being the
+        obvious case) are put on their own line and reproduced verbatim, so
+        the code keeps the indentation it was written with instead of being
+        mangled into one long line.
+        """
+        text = value if isinstance(value, str) else str(value)
+        lines = text.split("\n")
+        if len(lines) == 1:
+            return [f"    {name}={value}"]
+
+        formatted = [f'    {name}="""']
+        formatted.extend(f"    {line}" for line in lines)
+        formatted.append('    """')
+        return formatted
+
+    @classmethod
+    def _format_tool_arguments(cls, arguments: dict[str, object]) -> list[str] | None:
         """Format tool-call parameters for terminal display (all shown in full)."""
         if not arguments:
             return None
-        return ", ".join(f"{key}={value}" for key, value in arguments.items())
+
+        lines: list[str] = []
+        for name, value in arguments.items():
+            lines.extend(cls._format_tool_argument(name, value))
+        return lines
 
     @staticmethod
     def _format_tool_result(content_str: str) -> list[str]:
@@ -200,12 +224,10 @@ class ActiveSession:
         for tc in tool_calls:
             tool = self.ctx.tool_registry.get(tc.name)
 
-            ui.display.print_rule()
-            print(f"\U0001f680 Executing tool: {tc.name}...")
-
-            args_display = self._format_tool_arguments(tc.arguments)
-            if args_display:
-                ui.display.print_info("Args", args_display)
+            ui.display.print_tool_call(
+                tc.name,
+                self._format_tool_arguments(tc.arguments) or [],
+            )
 
             if not tool:
                 ui.display.report_error(f"Tool '{tc.name}' not found")
