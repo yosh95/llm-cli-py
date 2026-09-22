@@ -24,4 +24,4 @@ def test_display_helpers_emit_expected_labels(capsys) -> None:
     assert "  [code] print(1)" in out
     assert "Tool Result" in out and "Exit code: 0" in out
     assert out.count("Args:") == 1  # a call without arguments prints no Args block
-    assert "ERROR: Something broke" in out
+    assert "[ERROR] Something broke" in out

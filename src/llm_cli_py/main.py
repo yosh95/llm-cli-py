@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import http.client
 import logging
 import os
@@ -92,6 +93,13 @@ def initialize_tools() -> ToolRegistry:
 
 def main() -> None:
     """Main entry point."""
+    # Never die on an unencodable character: replace instead of raising.
+    # Keeps the CLI usable on consoles whose encoding (e.g. cp932 on Japanese
+    # Windows) cannot represent every emitted character, and removes any
+    # dependency on PYTHONIOENCODING being set in the environment.
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            _stream.reconfigure(errors="replace")
     # ── Logging configuration ─────────────────────────────────────────
     # LOG_LEVEL env var sets the root logger level (e.g., LOG_LEVEL=DEBUG, LOG_LEVEL=INFO)
     # This is a general-purpose control; any library's debug logs will be shown.

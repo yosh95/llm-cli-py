@@ -27,7 +27,7 @@ def print_block(content: str, title: str | None = None) -> None:
 def print_assistant(text: str) -> None:
     """Display the assistant's final answer with a clear, borderless label."""
     print_rule()
-    print_block(text, title="\U0001f600 Assistant")
+    print_block(text, title="Assistant")
 
 
 def stream_start(title: str) -> None:
@@ -57,7 +57,7 @@ def print_tool_call(name: str, arg_lines: list[str]) -> None:
     internal indentation. A call without arguments prints no ``Args:`` block.
     """
     print_rule()
-    print(f"\U0001f680 Executing tool: {name}...")
+    print(f"[Tool] Executing tool: {name}...")
     if not arg_lines:
         return
     print("Args:")
@@ -91,9 +91,9 @@ def report_info(message: str) -> None:
 
 def report_error(message: str) -> None:
     """Report an error message."""
-    print(f"\u26d4 ERROR: {message}")
+    print(f"[ERROR] {message}")
 
 
 def report_warning(message: str) -> None:
     """Report a warning message."""
-    print(f"\U0001f91a {message}")
+    print(f"[WARN] {message}")

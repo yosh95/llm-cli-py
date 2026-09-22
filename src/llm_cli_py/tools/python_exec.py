@@ -122,11 +122,19 @@ def execute_python(
 
     proc: subprocess.Popen[str] | None = None
     try:
+        # Decode the child's output explicitly as UTF-8, and force the child's
+        # own stdout/stderr to UTF-8 too. The defaults here are the parent's
+        # locale encoding (e.g. cp932 on Japanese Windows), which would either
+        # mangle UTF-8 output or raise UnicodeDecodeError in the reader thread.
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
             [sys.executable, str(tmp_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
             # Own session = own process group. The terminal's Ctrl+C therefore
             # skips the executed code, which is killed explicitly below instead.
             start_new_session=True,

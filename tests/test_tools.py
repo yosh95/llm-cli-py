@@ -87,6 +87,26 @@ class TestExecutePython:
         with pytest.raises(ProcessLookupError):
             os.kill(grandchild_pid, 0)
 
+    def test_non_ascii_stdout_roundtrips(self) -> None:
+        """Non-ASCII output must survive the subprocess pipe (regression).
+
+        The child's stdout is UTF-8 (pinned via PYTHONIOENCODING) while the
+        parent's *default* text decoding is the locale encoding (e.g. cp932 on
+        Japanese Windows). Without an explicit ``encoding="utf-8"`` on Popen the
+        reader thread raised UnicodeDecodeError and the output was lost.
+        """
+        result = execute_python('print("\u65e5\u672c\u8a9e")')
+        assert isinstance(result, ExecResult)
+        assert result.exit_code == 0
+        assert result.stdout.strip() == "\u65e5\u672c\u8a9e"
+
+    def test_emoji_stdout_roundtrips(self) -> None:
+        """Emoji must not crash the *child* even on a non-UTF-8 console."""
+        result = execute_python('print("\U0001f680")')
+        assert isinstance(result, ExecResult)
+        assert result.exit_code == 0
+        assert "\U0001f680" in result.stdout
+
     def test_dangerous_subprocess_pattern_is_refused(self) -> None:
         result = execute_python('subprocess.run(["cmd", "2>&1"], shell=True)')
         assert isinstance(result, ToolError)

@@ -74,7 +74,7 @@ def raise_for_status_with_detail(resp: requests.Response) -> None:
     if not (400 <= resp.status_code < 500):
         base = f"{resp.status_code} Server Error: {reason}"
     if detail:
-        base = f"{base} — {detail}"
+        base = f"{base} - {detail}"
 
     raise requests.exceptions.HTTPError(base, response=resp)
 
@@ -116,7 +116,7 @@ def post_with_retries(
                 detail = _error_detail_from_response(resp)
                 msg = f"HTTP {resp.status_code}"
                 if detail:
-                    msg = f"{msg} — {detail}"
+                    msg = f"{msg} - {detail}"
                 last_exception = requests.exceptions.HTTPError(msg, response=resp)
                 if attempt < max_retries - 1:
                     time.sleep(2**attempt)

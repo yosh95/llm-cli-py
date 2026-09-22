@@ -63,7 +63,7 @@ class ActiveSession:
             model = self.client.state.model
             display_model = model if model else "LLM"
             ui.display.print_rule()
-            print(f"\U0001f914 {display_model} is thinking...")
+            print(f"{display_model} is thinking...")
 
             stream_state = StreamState()
 
@@ -108,7 +108,7 @@ class ActiveSession:
 
         def on_text(delta: str) -> None:
             if not state.answer_open:
-                ui.display.stream_start("\U0001f600 Assistant:")
+                ui.display.stream_start("Assistant:")
                 state.answer_open = True
             ui.display.stream_text(delta)
 
