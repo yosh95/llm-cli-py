@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_cli_py.tools.python_exec import execute_python
+from llm_cli_py.tools.python_exec import ENV_PYTHON_EXEC, _resolve_child_python, execute_python
 from llm_cli_py.tools.types import ExecResult, ToolError
 
 
@@ -41,7 +41,9 @@ class TestExecutePython:
     )
     def test_stdout_is_captured(self, code: str, expected_stdout: str) -> None:
         result = execute_python(code)
-        assert result == ExecResult(stdout=result.stdout, stderr="", exit_code=0)
+        assert isinstance(result, ExecResult)
+        assert result.exit_code == 0
+        assert result.stderr == ""
         assert result.stdout.strip() == expected_stdout
 
     @pytest.mark.parametrize(
@@ -53,6 +55,7 @@ class TestExecutePython:
     )
     def test_errors_are_reported_in_stderr(self, code: str, needle: str) -> None:
         result = execute_python(code)
+        assert isinstance(result, ExecResult)
         assert result.exit_code == 1
         assert needle in result.stderr
 
@@ -114,6 +117,28 @@ class TestExecutePython:
         assert "2>&1" in result.error
 
 
+class TestChildInterpreter:
+    """The child runs with the CLI's own interpreter, and is overridable."""
+
+    def test_resolves_to_the_running_interpreter(self, monkeypatch) -> None:
+        import sys
+
+        monkeypatch.delenv(ENV_PYTHON_EXEC, raising=False)
+        assert _resolve_child_python() == sys.executable
+
+    def test_env_override_wins(self, monkeypatch) -> None:
+        monkeypatch.setenv(ENV_PYTHON_EXEC, "/opt/custom/python")
+        assert _resolve_child_python() == "/opt/custom/python"
+
+    def test_env_override_is_honoured_by_execute_python(self, monkeypatch) -> None:
+        """An override pointing at a broken path fails loudly, proving it is used."""
+        monkeypatch.setenv(ENV_PYTHON_EXEC, "/nonexistent/python-for-tests")
+        result = execute_python("print('never runs')")
+        assert isinstance(result, ExecResult)
+        assert result.exit_code == -1
+        assert "python-for-tests" in result.stderr or "No such file" in result.stderr
+
+
 class TestCheckDangerousSubprocess:
     """The static check must flag shell=True + list + meta-char, nothing else."""
 
@@ -163,6 +188,7 @@ class TestToolRegistry:
         assert registry.get("missing") is None
         assert [s.name for s in registry.get_schemas()] == ["calc"]
         assert tool.schema.description == "Calculate"
+        assert tool.schema.parameters == {"type": "object"}
 
     def test_tool_names_are_sorted(self) -> None:
         from llm_cli_py.tools.registry import ToolRegistry

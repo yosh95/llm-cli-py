@@ -21,9 +21,8 @@ from tests.conftest import (
 # ── Request building ──────────────────────────────────────────────
 
 
-def test_system_prompt_is_seeded_from_env(monkeypatch) -> None:
-    monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "You are a test assistant.")
-    client = make_client("gpt-4o")
+def test_system_prompt_is_seeded_from_the_constructor() -> None:
+    client = make_client("gpt-4o", system_prompt="You are a test assistant.")
     client._state.conversation.append(Message(role=Role.USER, content="Hello"))
 
     messages = client._build_messages()
@@ -31,33 +30,22 @@ def test_system_prompt_is_seeded_from_env(monkeypatch) -> None:
     assert messages[1] == {"role": "user", "content": "Hello"}
 
 
-def test_system_prompt_is_read_once_at_init(monkeypatch) -> None:
-    monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "Startup prompt.")
-    client = make_client("gpt-4o")
-    monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "Changed after init.")
-    assert client._build_messages()[0]["content"] == "Startup prompt."
-
-
-@pytest.mark.parametrize("value", [None, ""])
-def test_no_system_message_when_unset_or_empty(monkeypatch, value) -> None:
-    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
-    if value is not None:
-        monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", value)
+def test_no_system_message_is_seeded_when_the_prompt_is_empty() -> None:
     client = make_client("gpt-4o")
     client._state.conversation = [Message(role=Role.USER, content="Hello")]
     assert [m["role"] for m in client._build_messages()] == ["user"]
 
 
-def test_timestamps_are_recorded_but_never_sent(monkeypatch) -> None:
+def test_timestamps_are_recorded_but_never_sent() -> None:
     """Timestamps are local metadata for the log/dump, not part of the request."""
-    monkeypatch.setenv("LLM_CLI_SYSTEM_PROMPT", "sys")
-    client = make_client("gpt-4o")
-    client._append_user_messages([DataSource(text="Hello")])
+    client = make_client("gpt-4o", system_prompt="sys")
+    client._build_user_message([DataSource(text="Hello")])
     client._record_assistant(LlmResponse(text="Hi there"))
     client._state.conversation.append(Message(role=Role.TOOL, content="42", tool_call_id="call_1"))
 
     system, user, assistant = client._state.conversation[:3]
     assert all(m.timestamp for m in (system, user, assistant))
+    assert user.timestamp is not None
     assert datetime.fromisoformat(user.timestamp)
     messages = client._build_messages()
     assert messages and json.dumps(messages, ensure_ascii=False).count("timestamp") == 0
@@ -69,7 +57,9 @@ def test_tool_result_and_tool_call_entries_have_openai_shape() -> None:
         Message(
             role=Role.ASSISTANT,
             content="",
-            tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "python"}}],
+            tool_calls=[
+                {"id": "call_1", "type": "function", "function": {"name": "python", "arguments": "{}"}}
+            ],
         ),
         Message(role=Role.TOOL, content="42", tool_call_id="call_1"),
     ]
@@ -77,7 +67,9 @@ def test_tool_result_and_tool_call_entries_have_openai_shape() -> None:
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "python"}}],
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "python", "arguments": "{}"}}
+            ],
         },
         {"role": "tool", "tool_call_id": "call_1", "content": "42"},
     ]
@@ -89,12 +81,22 @@ def test_build_request_advertises_tools_and_streaming() -> None:
     body = client._build_request([{"role": "user", "content": "hi"}], [schema])
     assert body["model"] == "gpt-4o"
     assert body["stream"] is True
-    assert body["tools"][0]["function"]["name"] == "python"
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "function": {"name": "python", "description": "Run Python", "parameters": {"type": "object"}},
+        }
+    ]
+
+
+def test_no_tools_key_when_no_schemas() -> None:
+    client = make_client("gpt-4o")
+    assert "tools" not in client._build_request([], [])
 
 
 def test_source_types_are_labelled_in_the_user_turn() -> None:
     client = make_client()
-    client._append_user_messages(
+    client._build_user_message(
         [
             DataSource(text="plain"),
             DataSource(text="body", source_type="file"),
@@ -106,8 +108,13 @@ def test_source_types_are_labelled_in_the_user_turn() -> None:
     assert "[URL content]:\npage" in content
 
 
-def test_send_posts_to_chat_completions(monkeypatch) -> None:
-    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
+def test_blank_sources_are_not_appended() -> None:
+    client = make_client()
+    client._build_user_message([DataSource(text="   "), DataSource(text="")])
+    assert client._state.conversation == []
+
+
+def test_send_posts_to_chat_completions() -> None:
     client = make_client("gpt-4o")
     with patch(
         "llm_cli_py.utils.http.requests.Session.post", return_value=stream_response(text_stream("Answer"))
@@ -127,8 +134,9 @@ def test_replayed_tool_call_arguments_are_json_encoded() -> None:
     with patch("llm_cli_py.utils.http.requests.Session.post", return_value=resp):
         client.send([DataSource(text="run it")], [])
 
-    function = client._state.conversation[-1].tool_calls[0]["function"]
-    assert function["arguments"] == '{"code": "print(1)"}'
+    calls = client._state.conversation[-1].tool_calls
+    assert calls is not None
+    assert calls[0]["function"]["arguments"] == '{"code": "print(1)"}'
 
 
 # ── Retries ───────────────────────────────────────────────────────

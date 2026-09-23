@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -29,8 +30,6 @@ def _error_detail_from_response(resp: requests.Response, max_len: int = 800) -> 
 
     # Prefer structured JSON error fields.
     try:
-        import json
-
         data = json.loads(raw)
         err = data.get("error")
         if isinstance(err, dict):
@@ -55,7 +54,7 @@ def _error_detail_from_response(resp: requests.Response, max_len: int = 800) -> 
     # Fall back to a truncated raw body.
     body = raw.strip()
     if len(body) > max_len:
-        body = body[:max_len] + "…"
+        body = body[:max_len] + "\u2026"
     return body
 
 
@@ -77,6 +76,24 @@ def raise_for_status_with_detail(resp: requests.Response) -> None:
         base = f"{base} - {detail}"
 
     raise requests.exceptions.HTTPError(base, response=resp)
+
+
+def get_with_detail(
+    session: requests.Session,
+    url: str,
+    timeout: int,
+    *,
+    headers: dict[str, str] | None = None,
+) -> requests.Response:
+    """GET ``url``, raising an ``HTTPError`` that carries the provider's error body.
+
+    Same enrichment as :func:`raise_for_status_with_detail`, so a failing
+    ``models`` subcommand or URL fetch reports *why* the provider rejected the
+    request instead of a bare status line.
+    """
+    resp = session.get(url, headers=headers, timeout=timeout)
+    raise_for_status_with_detail(resp)
+    return resp
 
 
 def post_with_retries(
@@ -118,11 +135,9 @@ def post_with_retries(
                 if detail:
                     msg = f"{msg} - {detail}"
                 last_exception = requests.exceptions.HTTPError(msg, response=resp)
-                if attempt < max_retries - 1:
-                    time.sleep(2**attempt)
-                continue
-            raise_for_status_with_detail(resp)
-            return resp
+            else:
+                raise_for_status_with_detail(resp)
+                return resp
         except requests.exceptions.Timeout as exc:
             last_exception = exc
         except requests.exceptions.ConnectionError as exc:
@@ -136,4 +151,5 @@ def post_with_retries(
 
     if isinstance(last_exception, Exception):
         raise last_exception
-    raise RuntimeError("Request failed after retries")
+    msg = "Request failed after retries"
+    raise RuntimeError(msg)

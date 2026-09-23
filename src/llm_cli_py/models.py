@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypedDict
 
 
 class Role(StrEnum):
@@ -18,6 +18,27 @@ class Role(StrEnum):
     TOOL = "tool"
 
 
+class ToolCallFunction(TypedDict):
+    """The ``function`` object of an OpenAI-style tool call."""
+
+    name: str
+    arguments: str
+    """JSON-encoded argument string (the API requires a string, not an object)."""
+
+
+class ToolCallPayload(TypedDict):
+    """One entry of an assistant message's ``tool_calls`` array.
+
+    Used for the OpenAI wire format and when replaying a recorded assistant
+    turn. Typing it (rather than ``dict[str, object]``) keeps attribute-style
+    access checked and documents that ``arguments`` is always a JSON string.
+    """
+
+    id: str
+    type: str
+    function: ToolCallFunction
+
+
 @dataclass
 class Message:
     """A single message in the conversation."""
@@ -25,7 +46,7 @@ class Message:
     role: Role
     content: str
     tool_call_id: str | None = None
-    tool_calls: list[dict[str, object]] | None = None
+    tool_calls: list[ToolCallPayload] | None = None
     """Tool calls data (for assistant messages)."""
     timestamp: str | None = None
     """Local creation time as an ISO 8601 string (e.g. ``2026-09-16T12:34:56+09:00``).
@@ -98,10 +119,13 @@ class ClientState:
     """
 
     def notify_changed(self) -> None:
-        """Notify the change listener (if any) that the conversation has grown.
+        """Notify the change listener (if any) that the conversation grew.
 
         Called right after appending a message, before any network request, so
-        the log on disk is up to date even if the process dies mid-request.
+        the log on disk is up to date even if the process dies mid-request. It
+        is also called after an in-place repair (broken tool calls dropped), so
+        the persisted log matches the in-memory history.
+
         The listener is best-effort by design: exceptions are swallowed here so
         that a failing log write can never break the chat request.
         """

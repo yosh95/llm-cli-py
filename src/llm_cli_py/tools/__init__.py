@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from .python_exec import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, execute_python
 from .registry import Tool, ToolRegistry
-from .types import ExecResult, ToolError, ToolResult
+from .types import (
+    ExecResult,
+    ToolError,
+    ToolResult,
+    normalise_tool_result,
+    parse_tool_result,
+    render_tool_result,
+)
 
 __all__ = [
     "PYTHON_TOOL_DESCRIPTION",
@@ -15,4 +22,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "execute_python",
+    "normalise_tool_result",
+    "parse_tool_result",
+    "render_tool_result",
 ]

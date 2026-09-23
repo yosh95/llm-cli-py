@@ -29,7 +29,7 @@ Or, without activating anything:
 
 ```bash
 make install        # installs into .venv
-make install-dev    # .venv + dev tools (pytest, ruff)
+make install-dev    # .venv + dev tools (pytest, ruff, mypy)
 pipx install -e .   # global, independent of .venv
 ```
 
@@ -39,15 +39,22 @@ On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
 ## Usage
 
 ```bash
-export LLM_CLI_API_URL="http://localhost:11434/v1"   # any OpenAI-compatible endpoint
+export LLM_CLI_API_URL="http://localhost:11434/v1"   # required: any OpenAI-compatible endpoint
 export LLM_CLI_API_KEY="your-api-key"                # optional for local instances
 export LLM_CLI_MODEL="gpt-4o"                        # optional, or use -m
 
-llm-cli-py -m gpt-4o "What is the capital of France?"   # one-shot
+llm-cli-py -m gpt-4o "What is the capital of France?"   # one-shot prompt
 llm-cli-py -m gpt-4o -s README.md "Summarize this file" # with file/URL input
 llm-cli-py -m gpt-4o                                   # interactive
 llm-cli-py models                                      # list models
 ```
+
+Sources given with `-s/--source` are classified automatically: an existing path
+is read as a file, an `http(s)://` URL is fetched, and anything else is passed
+through as literal text. Trailing bare words are treated as additional prompt
+text, so `llm-cli-py -m gpt-4o "…"` and `llm-cli-py -m gpt-4o -s "…"` are
+equivalent. `models` may be given as the first argument; it is recognised before
+any prompt text.
 
 ### Slash Commands (Interactive Mode)
 
@@ -62,13 +69,14 @@ llm-cli-py models                                      # list models
 
 | Variable | Description |
 |---|---|
-| `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API. Default: `http://localhost:11434/v1` |
+| `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API. Required (e.g. `http://localhost:11434/v1`); can be given with `--api-url`. |
 | `LLM_CLI_API_KEY` | API key (optional for local instances). Overridden by `--api-key`. |
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
 | `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
-| `LLM_CLI_PROMPT_HISTORY_FILE` | File to persist prompt input history across runs. |
-| `LLM_CLI_CHAT_LOG_FILE` | File to write the conversation to (same as `/dump`, flushed after every message). |
+| `LLM_CLI_PROMPT_HISTORY_FILE` | File to persist prompt input history across runs (e.g. `~/.llm_cli_prompt_history`). |
+| `LLM_CLI_CHAT_LOG_FILE` | File to write the conversation to (same content as `/dump`, flushed after every message). |
 | `LLM_CLI_CHAT_LOG_APPEND` | `1`/`true`/`yes`/`on` to append new messages instead of rewriting the file. |
+| `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
 | `LOG_LEVEL` | Root logger level (e.g. `DEBUG`, `INFO`). |
 | `DEBUG_HTTP` | `1`/`true` for raw HTTP request/response debugging. |
 
@@ -98,6 +106,10 @@ environment and file-system access as the CLI itself, and runs without a
 timeout: interrupt it with Ctrl+C, which kills the code and everything it
 spawned.
 
+A tool must return an `ExecResult` or a `ToolError`; any other return value is
+reported to the model as an explicit error rather than being silently treated as
+output.
+
 ## Development
 
 ```bash
@@ -105,6 +117,10 @@ make install-dev   # create .venv + pip install -e ".[dev]"
 make test          # pytest -v
 make check         # ruff check
 make format        # ruff format
+make typecheck     # mypy
+make check-all     # format + check + typecheck + test
+make clean         # remove caches and build artifacts (keeps .venv)
+make clean-all     # clean, and remove .venv too
 ```
 
 Dependencies live in `pyproject.toml` (runtime under `[project] dependencies`,

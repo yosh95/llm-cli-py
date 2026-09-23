@@ -15,7 +15,7 @@ import pytest
 from llm_cli_py.models import DataSource, LlmResponse, ToolCall
 from llm_cli_py.providers.llm_api import LlmApiClient
 from llm_cli_py.session.session import ActiveSession, SessionContext
-from llm_cli_py.tools.registry import ToolRegistry
+from llm_cli_py.tools.registry import ToolFunc, ToolRegistry
 from llm_cli_py.tools.types import ExecResult
 
 TEST_URL = "https://api.example.com/v1"
@@ -46,8 +46,14 @@ def text_stream(*texts: str) -> list[str]:
     return [sse_chunk({"content": t}) for t in texts] + [sse_chunk({}, finish_reason="stop"), "data: [DONE]"]
 
 
-def make_client(model: str = "m", api_key: str = "k") -> LlmApiClient:
-    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key)
+def make_client(
+    model: str = "m",
+    api_key: str = "k",
+    *,
+    system_prompt: str = "",
+) -> LlmApiClient:
+    """Build a client against the fake URL (no network: requests are patched by tests)."""
+    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key, system_prompt=system_prompt)
 
 
 def exec_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
@@ -55,7 +61,7 @@ def exec_tool(**kwargs: object) -> ExecResult:  # noqa: ARG001
     return ExecResult(stdout="ok")
 
 
-def register(registry: ToolRegistry, name: str, func=exec_tool) -> ToolRegistry:
+def register(registry: ToolRegistry, name: str, func: ToolFunc = exec_tool) -> ToolRegistry:
     """Register ``func`` as tool ``name`` and return the registry."""
     registry.register(name, f"{name} tool", {"type": "object", "properties": {}}, func)
     return registry

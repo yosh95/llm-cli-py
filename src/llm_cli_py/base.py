@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
@@ -13,18 +12,19 @@ from .utils.timeutil import now_iso
 class LlmClient(ABC):
     """Abstract base class for LLM API clients."""
 
-    def __init__(self, model: str) -> None:
-        """Initialize state, reading the system prompt once at startup.
+    def __init__(self, model: str, *, system_prompt: str = "") -> None:
+        """Initialize state, seeding ``system_prompt`` as the first message.
 
-        The ``LLM_CLI_SYSTEM_PROMPT`` environment variable is snapshotted here and
-        seeded as the first message of the conversation. It is intentionally
-        NOT re-read per request: mid-session changes would make later turns
-        inconsistent with earlier context. When unset or empty, no system
-        message is seeded (no default/date prompt is injected).
+        The prompt is supplied by the caller (the CLI composition root reads
+        ``LLM_CLI_SYSTEM_PROMPT`` once at startup) rather than read from the
+        environment here: configuration is passed in explicitly, so tests and
+        other embedders can construct a client without touching ``os.environ``.
+        It is intentionally NOT re-read per request: mid-session changes would
+        make later turns inconsistent with earlier context. When empty, no
+        system message is seeded (no default/date prompt is injected).
         """
         # Timestamps are local metadata (chat log / dump only); they are never
         # sent to the API -- see LlmApiClient._build_messages.
-        system_prompt = os.environ.get("LLM_CLI_SYSTEM_PROMPT", "")
         self._state = ClientState(
             model=model,
             system_prompt=system_prompt,

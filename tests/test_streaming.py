@@ -12,9 +12,10 @@ from tests.conftest import make_client, sse_chunk, stream_response, text_stream,
 
 def test_text_stream_is_accumulated_and_streamed_live() -> None:
     client = make_client()
-    chunks = [_sse for _sse in text_stream("Hello ", "world")]
     deltas: list[str] = []
-    result = client._parse_stream_response(stream_response(chunks), on_text=deltas.append)
+    result = client._parse_stream_response(
+        stream_response(text_stream("Hello ", "world")), on_text=deltas.append
+    )
 
     assert result.text == "Hello world"
     assert deltas == ["Hello ", "world"]
@@ -47,8 +48,7 @@ def test_truncated_tool_call_sets_parse_error_and_empty_arguments() -> None:
     assert tc.parse_error == '{"code": "pri'
 
 
-def test_send_requests_a_stream_and_records_the_answer(monkeypatch) -> None:
-    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
+def test_send_requests_a_stream_and_records_the_answer() -> None:
     client = make_client()
     with patch(
         "llm_cli_py.providers.llm_api.post_with_retries", return_value=stream_response(text_stream("Hi"))
@@ -60,9 +60,8 @@ def test_send_requests_a_stream_and_records_the_answer(monkeypatch) -> None:
     assert [m.role.value for m in client.state.conversation] == ["user", "assistant"]
 
 
-def test_send_notifies_state_change_once_per_message(monkeypatch) -> None:
+def test_send_notifies_state_change_once_per_message() -> None:
     """The client signals history changes so the log can be flushed per message."""
-    monkeypatch.delenv("LLM_CLI_SYSTEM_PROMPT", raising=False)
     client = make_client()
     counts: list[int] = []
     client.state.on_change = lambda: counts.append(len(client.state.conversation))

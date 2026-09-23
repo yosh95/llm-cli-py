@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-cli-py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Unified OpenAI-Compatible CLI for AI Agents (Python Edition)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,15 +23,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "requests",
-    "prompt_toolkit",
-    "tomli-w",
+    "requests>=2.31",
+    "prompt_toolkit>=3.0",
+    "tomli-w>=1.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "ruff",
+    "pytest>=8",
+    "ruff>=0.5",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -45,10 +46,16 @@ target-version = "py312"
 line-length = 110
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "EM", "PERF", "PIE", "PTH", "RET", "RUF", "TRY"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+strict = true
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 # "." lets the tests import shared helpers from tests/conftest.py as a module

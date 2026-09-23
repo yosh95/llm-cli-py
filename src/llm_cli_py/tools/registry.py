@@ -21,6 +21,8 @@ class Tool:
         func: ToolFunc,
     ) -> None:
         self.name = name
+        self.description = description
+        self.parameters = parameters
         self.func = func
         self.schema = ToolSchema(
             name=name,

@@ -10,7 +10,15 @@ import requests
 
 from ..base import LlmClient
 from ..consts import DEFAULT_REQUEST_TIMEOUT
-from ..models import DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
+from ..models import (
+    DataSource,
+    LlmResponse,
+    Message,
+    Role,
+    ToolCall,
+    ToolCallPayload,
+    ToolSchema,
+)
 from ..utils.http import post_with_retries
 from ..utils.timeutil import now_iso
 
@@ -24,8 +32,10 @@ class LlmApiClient(LlmClient):
         api_url: str,
         api_key: str | None = None,
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        *,
+        system_prompt: str = "",
     ) -> None:
-        super().__init__(model)
+        super().__init__(model, system_prompt=system_prompt)
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
@@ -59,20 +69,20 @@ class LlmApiClient(LlmClient):
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _build_messages(self) -> list[dict[str, Any]]:
+    def _build_messages(self) -> list[dict[str, object]]:
         """Build the messages array for the API request.
 
         Only the fields the API understands are emitted. ``Message`` carries
         extra local metadata (``timestamp``) that is intentionally dropped here:
         it is for the chat log / ``/dump`` only and must never reach the model.
         """
-        messages: list[dict[str, Any]] = []
+        messages: list[dict[str, object]] = []
 
         # The system prompt is seeded into the conversation at client
         # initialization (see LlmClient.__init__) and simply replayed here
         # with the rest of the history.
         for msg in self._state.conversation:
-            entry: dict[str, Any] = {"role": msg.role.value}
+            entry: dict[str, object] = {"role": msg.role.value}
 
             if msg.role == Role.TOOL:
                 entry["tool_call_id"] = msg.tool_call_id or ""
@@ -89,16 +99,16 @@ class LlmApiClient(LlmClient):
 
     def _build_request(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, object]],
         tool_schemas: list[ToolSchema],
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Build the request body for the API call.
 
         Args:
             messages: The message array to send.
             tool_schemas: Tool schemas to advertise to the model.
         """
-        body: dict[str, Any] = {
+        body: dict[str, object] = {
             "model": self._state.model,
             "messages": messages,
             "stream": True,
@@ -224,8 +234,8 @@ class LlmApiClient(LlmClient):
 
         return LlmResponse(text="".join(text_parts) or None, tool_calls=tool_calls)
 
-    def _append_user_messages(self, data: list[DataSource]) -> None:
-        """Append user messages from ``data`` to the conversation state."""
+    def _build_user_message(self, data: list[DataSource]) -> None:
+        """Append the user turn built from ``data`` to the conversation state."""
         user_content = ""
         for ds in data:
             if ds.source_type == "text":
@@ -243,22 +253,22 @@ class LlmApiClient(LlmClient):
         """Append the assistant response (text/reasoning/tool_calls) to history."""
         if not (result.text or result.tool_calls):
             return
-        tool_calls_data: list[dict[str, object]] | None = None
+        tool_calls_data: list[ToolCallPayload] | None = None
         if result.tool_calls:
             tool_calls_data = []
             for tc in result.tool_calls:
                 tool_calls_data.append(
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
+                    ToolCallPayload(
+                        id=tc.id,
+                        type="function",
+                        function={
                             "name": tc.name,
                             # OpenAI-compatible APIs require arguments to be a
                             # JSON-encoded string, not a nested object, when the
                             # assistant's tool call is replayed back in later requests.
                             "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                         },
-                    }
+                    )
                 )
 
         self._state.conversation.append(
@@ -291,7 +301,7 @@ class LlmApiClient(LlmClient):
             empty; the caller is responsible for surfacing the failure (no
             silent non-streaming fallback).
         """
-        self._append_user_messages(data)
+        self._build_user_message(data)
         # The user's turn is now in the history: flush it to the chat log right
         # away so it survives even if this request never returns (crash, kill).
         self.state.notify_changed()

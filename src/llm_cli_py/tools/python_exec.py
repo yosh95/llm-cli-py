@@ -3,15 +3,50 @@
 import ast
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from ..consts import DEFAULT_CHILD_PYTHON
 from .types import ExecResult, ToolError
 
+ENV_PYTHON_EXEC = "LLM_CLI_PYTHON_EXEC"
+"""Environment variable overriding the interpreter used to run tool code.
+
+The CLI may be installed in an isolated environment (e.g. ``uv tool install``
+or ``pipx``) whose interpreter is *not* the one a user's ``python3`` resolves
+to. The tool code should run with the same interpreter as the CLI itself, so
+``execute_python`` prefers this override first, then ``sys.executable``, and
+only falls back to ``python3`` if the CLI process has no usable interpreter
+(e.g. under some embedded/frozen builds).
+"""
+
 _SHELL_META = {">", "<", "|", "2>&1", "2>", "1>", ">>", "2>>", ";", "&", "`", "$("}
+
+
+def _resolve_child_python() -> str:
+    """Return the interpreter used to execute tool code.
+
+    Preference order: ``LLM_CLI_PYTHON_EXEC`` override, the running interpreter
+    (``sys.executable``), then ``python3`` on ``PATH``. The CLI runs tool code
+    with *its own* interpreter so the tool sees the same installed packages.
+    """
+    override = os.environ.get(ENV_PYTHON_EXEC, "").strip()
+    if override:
+        return override
+    if sys.executable:
+        return sys.executable
+    found = shutil.which(DEFAULT_CHILD_PYTHON)
+    if found:
+        return found
+    msg = (
+        "No Python interpreter available to run tool code: "
+        "sys.executable is empty and 'python3' was not found on PATH."
+    )
+    raise RuntimeError(msg)
 
 
 def _check_dangerous_subprocess(code: str) -> str | None:
@@ -70,7 +105,7 @@ def _check_dangerous_subprocess(code: str) -> str | None:
     return c.error
 
 
-def _kill_process_group(proc: subprocess.Popen) -> None:
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
     """Kill the child process and every process it spawned.
 
     ``proc`` was started with ``start_new_session=True``, so its pid is also the
@@ -128,7 +163,7 @@ def execute_python(
         # mangle UTF-8 output or raise UnicodeDecodeError in the reader thread.
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
-            [sys.executable, str(tmp_path)],
+            [_resolve_child_python(), str(tmp_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

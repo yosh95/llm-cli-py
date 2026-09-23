@@ -1,4 +1,9 @@
-"""Display utilities - terminal output."""
+"""Display utilities - terminal output.
+
+Every user-visible line goes through this module, so output style (rules,
+labels, indentation, prefixes) is defined in one place rather than sprinkled
+as bare ``print`` calls across the session loop.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +33,11 @@ def print_assistant(text: str) -> None:
     """Display the assistant's final answer with a clear, borderless label."""
     print_rule()
     print_block(text, title="Assistant")
+
+
+def print_thinking(model: str) -> None:
+    """Announce that a request is in flight for ``model``."""
+    print(f"{model} is thinking...")
 
 
 def stream_start(title: str) -> None:

@@ -12,6 +12,10 @@ DEFAULT_URL_FETCH_TIMEOUT: int = 30
 """Default timeout for fetching URL content from CLI arguments."""
 
 
+DEFAULT_CHILD_PYTHON: str = "python3"
+"""Interpreter used by ``execute_python`` when the env var below is unset."""
+
+
 # ── Environment variable names ─────────────────────────────────────
 
 ENV_API_KEY = "LLM_CLI_API_KEY"
@@ -23,8 +27,33 @@ ENV_API_URL = "LLM_CLI_API_URL"
 ENV_MODEL = "LLM_CLI_MODEL"
 """Environment variable for the default LLM model."""
 
+ENV_SYSTEM_PROMPT = "LLM_CLI_SYSTEM_PROMPT"
+"""Environment variable holding the system prompt.
+
+Read exactly once, by the composition root (``main``), and passed to the client
+as a constructor argument -- it is seeded as the first conversation message.
+When unset or empty, no system message is sent.
+"""
+
 DEFAULT_API_URL = "http://localhost:11434/v1"
-"""Default LLM API base URL (OpenAI-compatible endpoint)."""
+"""Example LLM API base URL (OpenAI-compatible endpoint).
+
+Shown in ``--help`` and in the "not configured" error; there is no implicit
+default -- the API URL must be configured explicitly.
+"""
+
+
+TRUTHY_VALUES: tuple[str, ...] = ("1", "true", "yes", "on")
+"""Lower-cased strings accepted as boolean ``true`` for env-var flags."""
+
+
+# ── Logging ────────────────────────────────────────────────────────
+
+ENV_LOG_LEVEL = "LOG_LEVEL"
+"""Environment variable setting the root logger level (e.g. ``DEBUG``)."""
+
+ENV_DEBUG_HTTP = "DEBUG_HTTP"
+"""Environment variable enabling raw HTTP request/response debugging."""
 
 
 # ── Prompt history / chat log ─────────────────────────────────

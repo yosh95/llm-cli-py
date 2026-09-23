@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -22,6 +23,11 @@ def test_no_model_is_reported_before_the_first_turn(session: ActiveSession, turn
     session.client.state.model = ""
     out = turn([LlmResponse(text="Hello from LLM")], text="Hello")
     assert "No model specified locally" in out
+
+
+def test_thinking_line_names_the_model(turn) -> None:
+    out = turn([LlmResponse(text="Hi")])
+    assert "gpt-4o is thinking..." in out
 
 
 def test_plain_answer_is_printed_when_no_delta_streamed(turn) -> None:
@@ -52,6 +58,13 @@ def test_tool_arguments_and_result_are_displayed(session: ActiveSession, turn) -
     assert "Executing tool: calc" in out
     assert "  [code] print(1)" in out  # rendered under its Args label
     assert "Exit code: 0" in out  # the ExecResult is rendered
+    assert "Tool Result" in out
+
+
+def test_unknown_tool_is_recorded_as_a_tool_message(session: ActiveSession, turn) -> None:
+    turn(tool_then_text(ToolCall(id="c1", name="ghost", arguments={})))
+    tool_msgs = [m for m in session.client.state.conversation if m.role == Role.TOOL]
+    assert tool_msgs and "not found" in tool_msgs[0].content
 
 
 @pytest.mark.parametrize(
@@ -71,12 +84,21 @@ def test_tool_failures_are_surfaced_and_recorded(
     assert any(m.role == Role.TOOL for m in session.client.state.conversation)
 
 
+def test_tool_returning_a_bare_string_is_reported_as_an_invalid_result(session: ActiveSession, turn) -> None:
+    """A tool must return ExecResult/ToolError; anything else is a clear error."""
+    register(session.ctx.tool_registry, "bad", lambda **_: "error happened")
+    out = turn(tool_then_text(ToolCall(id="c1", name="bad", arguments={})))
+    assert "invalid result type" in out
+    tool_msgs = [m for m in session.client.state.conversation if m.role == Role.TOOL]
+    assert json.loads(tool_msgs[0].content)["error"].startswith("Tool returned an invalid result type")
+
+
 def test_tool_result_is_recorded_in_history(session: ActiveSession, turn) -> None:
     register(session.ctx.tool_registry, "calc", lambda **_: ExecResult(stdout="42"))
     turn(tool_then_text(ToolCall(id="c1", name="calc", arguments={})))
     tool_msgs = [m for m in session.client.state.conversation if m.role == Role.TOOL]
     assert len(tool_msgs) == 1
-    assert '"42"' in tool_msgs[0].content
+    assert json.loads(tool_msgs[0].content)["stdout"] == "42"
     assert tool_msgs[0].tool_call_id == "c1"
 
 
@@ -100,6 +122,21 @@ def test_broken_tool_calls_are_dropped_from_history(session: ActiveSession) -> N
     )
     session._drop_broken_tool_calls_from_history([ToolCall(id="c1", name="x", arguments={}, parse_error="{")])
     assert session.client.state.conversation[-1].tool_calls is None
+
+
+def test_dropping_broken_tool_calls_refreshes_the_persisted_log(session: ActiveSession) -> None:
+    """The repair must be flushed so the log matches the in-memory history."""
+    flushes: list[int] = []
+    session.client.state.on_change = lambda: flushes.append(len(session.client.state.conversation))
+    session.client.state.conversation.append(
+        Message(
+            role=Role.ASSISTANT,
+            content="",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{"}}],
+        )
+    )
+    session._drop_broken_tool_calls_from_history([ToolCall(id="c1", name="x", arguments={}, parse_error="{")])
+    assert flushes == [1]
 
 
 def test_tool_arguments_formatting() -> None:

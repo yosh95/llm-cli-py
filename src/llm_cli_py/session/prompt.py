@@ -24,18 +24,11 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from ..consts import ENV_PROMPT_HISTORY_FILE
+from .slash import SLASH_COMMANDS
 
 
 class SlashCommandCompleter(Completer):
-    """Completer for slash commands."""
-
-    def __init__(self) -> None:
-        self._commands = {
-            "/help": "Show this help message",
-            "/quit": "Exit the session",
-            "/info": "Show session information",
-            "/dump": "Dump conversation history as TOML to stdout",
-        }
+    """Completer for slash commands, driven by the shared command list."""
 
     def get_completions(
         self,
@@ -44,18 +37,16 @@ class SlashCommandCompleter(Completer):
     ) -> Iterable[Completion]:
         text = document.text_before_cursor
 
-        if not text.startswith("/"):
+        if not text.startswith("/") or " " in text:
             return
 
-        if " " not in text:
-            for cmd, desc in self._commands.items():
-                if cmd.startswith(text):
-                    yield Completion(
-                        cmd,
-                        start_position=-len(text),
-                        display=f"{cmd}  ({desc})",
-                    )
-            return
+        for spec in SLASH_COMMANDS:
+            if spec.canonical.startswith(text):
+                yield Completion(
+                    spec.canonical,
+                    start_position=-len(text),
+                    display=f"{spec.canonical}  ({spec.description})",
+                )
 
 
 def build_key_bindings() -> KeyBindings:

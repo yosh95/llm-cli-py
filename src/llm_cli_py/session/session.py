@@ -8,7 +8,7 @@ from .. import ui
 from ..base import LlmClient
 from ..models import ClientState, DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
 from ..tools.registry import ToolRegistry
-from ..tools.types import ExecResult, ToolError
+from ..tools.types import ExecResult, ToolError, normalise_tool_result, render_tool_result
 from ..utils.timeutil import now_iso
 from .stream_state import StreamState
 
@@ -63,7 +63,7 @@ class ActiveSession:
             model = self.client.state.model
             display_model = model if model else "LLM"
             ui.display.print_rule()
-            print(f"{display_model} is thinking...")
+            ui.display.print_thinking(display_model)
 
             stream_state = StreamState()
 
@@ -96,7 +96,6 @@ class ActiveSession:
                 break
 
             self._handle_tool_calls(response.tool_calls)
-            current_data = []
 
     def _send_streamed(
         self,
@@ -140,6 +139,11 @@ class ActiveSession:
         request carry assistant tool_calls with no matching tool result, which
         some OpenAI-compatible APIs reject with HTTP 400. Drop them so the user
         can simply retry with a clean assistant message.
+
+        The repair is made in place, so the change listener is notified again to
+        re-flush the chat log: the persisted history must stay identical to the
+        in-memory one (otherwise the log keeps an assistant turn the session no
+        longer believes in).
         """
         broken_ids = {tc.id for tc in tool_calls if tc.parse_error is not None}
         for msg in reversed(self.client.state.conversation):
@@ -149,6 +153,7 @@ class ActiveSession:
             if not msg.tool_calls:
                 msg.tool_calls = None
             break
+        self.client.state.notify_changed()
 
     @staticmethod
     def _format_tool_argument(name: str, value: object) -> list[str]:
@@ -184,44 +189,6 @@ class ActiveSession:
             lines.extend(cls._format_tool_argument(name, value))
         return lines
 
-    @staticmethod
-    def _format_tool_result(content_str: str) -> list[str]:
-        """Format tool execution result for terminal display.
-
-        Parses the JSON result and returns a list of display lines.
-        """
-        if not content_str:
-            return ["(empty result)"]
-
-        try:
-            data = json.loads(content_str)
-        except json.JSONDecodeError:
-            return [content_str]
-
-        lines: list[str] = []
-
-        if "error" in data and "stdout" not in data:
-            # ToolError
-            lines.append(f"Error: {data['error']}")
-        elif "stdout" in data:
-            # ExecResult
-            ec = data.get("exit_code", 0)
-            lines.append(f"Exit code: {ec}")
-            stdout = str(data.get("stdout", ""))
-            if stdout.strip():
-                lines.append("[stdout]")
-                for line in stdout.rstrip().splitlines():
-                    lines.append(f"  {line}")
-            stderr_val = str(data.get("stderr", ""))
-            if stderr_val.strip():
-                lines.append("[stderr]")
-                for line in stderr_val.rstrip().splitlines():
-                    lines.append(f"  {line}")
-        else:
-            lines.append(content_str)
-
-        return lines
-
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
@@ -243,20 +210,16 @@ class ActiveSession:
 
             try:
                 result = tool.func(**tc.arguments)
-
-                if isinstance(result, ToolError):
-                    content_str = result.error
-                elif isinstance(result, ExecResult):
-                    content_str = json.dumps(result.to_dict(), ensure_ascii=False)
-                else:
-                    content_str = json.dumps(result, ensure_ascii=False) if result is not None else ""
-
-                # Display the tool execution result
-                result_lines = self._format_tool_result(content_str)
-                ui.display.print_tool_result(result_lines)
-
-                _append_tool_message(self.client.state, content_str, tc.id)
-
             except Exception as e:
                 ui.display.report_error(f"Tool '{tc.name}' failed: {e}")
                 _append_tool_message(self.client.state, str(e), tc.id)
+                continue
+
+            # A tool that returned something other than ExecResult/ToolError is
+            # a programming error; normalise it into a ToolError instead of
+            # silently treating the value as a successful result.
+            normalised: ExecResult | ToolError = normalise_tool_result(result)
+            content_str = json.dumps(normalised.to_dict(), ensure_ascii=False)
+
+            ui.display.print_tool_result(render_tool_result(content_str))
+            _append_tool_message(self.client.state, content_str, tc.id)
