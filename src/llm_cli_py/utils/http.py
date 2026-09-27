@@ -20,16 +20,15 @@ RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _ERROR_DETAIL_MAX_LEN = 800
 """Maximum length of a raw error body quoted back to the user."""
 
+_MAX_ATTEMPTS = 3
+"""How many times a request is attempted in total (1 try + 2 retries)."""
+
 
 class HttpError(Exception):
-    """HTTP request failure, optionally carrying the provider's error body."""
-
-    def __init__(self, message: str, *, status: int | None = None) -> None:
-        super().__init__(message)
-        self.status = status
+    """HTTP request failure whose message carries the provider's error body."""
 
 
-def _error_detail(raw: str, max_len: int = _ERROR_DETAIL_MAX_LEN) -> str:
+def _error_detail(raw: str) -> str:
     """Extract a human-readable error detail from an HTTP response body.
 
     Many providers (DeepSeek, Ollama) return a JSON error body whose
@@ -61,8 +60,8 @@ def _error_detail(raw: str, max_len: int = _ERROR_DETAIL_MAX_LEN) -> str:
             return str(message)
 
     body = raw.strip()
-    if len(body) > max_len:
-        body = body[:max_len] + "\u2026"
+    if len(body) > _ERROR_DETAIL_MAX_LEN:
+        body = body[:_ERROR_DETAIL_MAX_LEN] + "\u2026"
     return body
 
 
@@ -73,14 +72,13 @@ def _http_error(status: int, reason: str, raw: str) -> HttpError:
     detail = _error_detail(raw)
     if detail:
         message = f"{message} - {detail}"
-    return HttpError(message, status=status)
+    return HttpError(message)
 
 
 def post_json(
     url: str,
     json_body: dict[str, Any],
     timeout: int,
-    max_retries: int = 3,
     *,
     api_key: str = "",
 ) -> dict[str, Any]:
@@ -88,13 +86,14 @@ def post_json(
 
     Retries transient failures (429/5xx, timeouts, connection errors) with
     exponential backoff starting at 1 second; other HTTP errors (e.g. 400, 401)
-    are raised immediately, because retrying them cannot help.
+    are raised immediately, because retrying them cannot help. The attempt
+    limit is fixed (see ``_MAX_ATTEMPTS``): this is the one request the CLI
+    makes, and it is not configurable from the outside.
 
     Args:
         url: Target URL.
         json_body: The JSON request body.
         timeout: Request timeout in seconds.
-        max_retries: Maximum number of attempts (default 3).
         api_key: Optional API key, sent as ``Authorization: Bearer <key>``.
 
     Returns:
@@ -108,7 +107,7 @@ def post_json(
         headers["Authorization"] = f"Bearer {api_key}"
 
     last_error: HttpError | None = None
-    for attempt in range(max_retries):
+    for attempt in range(_MAX_ATTEMPTS):
         try:
             resp = requests.post(
                 url,
@@ -134,7 +133,7 @@ def post_json(
             # are both worth another attempt.
             last_error = HttpError(f"Request failed: {e}")
 
-        if attempt < max_retries - 1:
+        if attempt < _MAX_ATTEMPTS - 1:
             time.sleep(2**attempt)
 
     assert last_error is not None

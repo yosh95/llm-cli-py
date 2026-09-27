@@ -17,11 +17,16 @@ class Role(StrEnum):
 
 
 class ToolCallFunction(TypedDict):
-    """The ``function`` object of an OpenAI-style tool call."""
+    """The ``function`` object of an OpenAI-style tool call.
+
+    Attributes:
+        name: Name of the tool to call.
+        arguments: JSON-encoded argument string (the API requires a string, not
+            an object).
+    """
 
     name: str
     arguments: str
-    """JSON-encoded argument string (the API requires a string, not an object)."""
 
 
 class ToolCallPayload(TypedDict):
@@ -39,13 +44,19 @@ class ToolCallPayload(TypedDict):
 
 @dataclass
 class Message:
-    """A single message in the conversation."""
+    """A single message in the conversation.
+
+    Attributes:
+        role: Who the message is from.
+        content: The message text (may be empty).
+        tool_call_id: The tool call this message answers (``Role.TOOL`` only).
+        tool_calls: Tool calls the assistant asked for (``Role.ASSISTANT`` only).
+    """
 
     role: Role
     content: str
     tool_call_id: str | None = None
     tool_calls: list[ToolCallPayload] | None = None
-    """Tool calls data (for assistant messages)."""
 
 
 @dataclass
@@ -58,13 +69,20 @@ class LlmResponse:
 
 @dataclass
 class ToolCall:
-    """A tool call requested by the LLM."""
+    """A tool call requested by the LLM.
+
+    Attributes:
+        id: Identifier the result has to be sent back with.
+        name: Name of the tool to call.
+        arguments: Parsed arguments (empty when they could not be parsed).
+        parse_error: The raw arguments string when it was not valid JSON; such a
+            call must not be executed.
+    """
 
     id: str
     name: str
     arguments: dict[str, object]
     parse_error: str | None = None
-    """Raw (unparseable) arguments string when the tool call's JSON was broken."""
 
 
 @dataclass
@@ -81,6 +99,4 @@ class ClientState:
     """State of an LLM client session."""
 
     model: str = ""
-    system_prompt: str = ""
-    """System prompt read once at client initialization (startup snapshot)."""
     conversation: list[Message] = field(default_factory=list)

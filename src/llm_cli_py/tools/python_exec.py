@@ -25,6 +25,11 @@ only falls back to ``python3`` if the CLI process has no usable interpreter
 """
 
 _SHELL_META = {">", "<", "|", "2>&1", "2>", "1>", ">>", "2>>", ";", "&", "`", "$("}
+"""Tokens that mean something to a shell but are inert inside an argv list.
+
+Used only to make the refusal message concrete: the mere presence of one of
+these is not by itself harmful (see ``_check_shell_true_with_list``).
+"""
 
 
 def _resolve_child_python() -> str:
@@ -49,8 +54,29 @@ def _resolve_child_python() -> str:
     raise RuntimeError(msg)
 
 
-def _check_dangerous_subprocess(code: str) -> str | None:
-    """Check for dangerous subprocess.run/Popen patterns that cause hangs."""
+def _check_shell_true_with_list(code: str) -> str | None:
+    """Return an explanation if ``code`` calls subprocess with ``shell=True`` and an argv list.
+
+    That combination is almost always a mistake: ``shell=True`` hands ``argv[0]``
+    to the shell as a command *string* and ignores the remaining list elements,
+    so ``subprocess.run(["cmd", "2>&1"], shell=True)`` runs ``cmd`` alone -- the
+    argument the code meant to pass is silently dropped. (The command string may
+    also be a command the shell resolves from ``PATH`` rather than the program
+    named in the list.) The process does not hang; it simply does not do what
+    the call site says, which is silent enough to be worth refusing while the
+    agent can still see the reason.
+
+    What this check deliberately does not do: judge individual strings for shell
+    metacharacters. ``&``, ``|`` and friends appear in perfectly ordinary
+    arguments (URL query strings, log formats), and a list element is not run by
+    a shell at all unless the whole command is one string.
+
+    The list itself is not rejected: a code string is the only argument, exactly
+    as the subprocess docs recommend.
+
+    Returns:
+        A human-readable refusal, or ``None`` when nothing of the sort is found.
+    """
     try:
         tree = ast.parse(code)
     except SyntaxError:
@@ -81,23 +107,34 @@ def _check_dangerous_subprocess(code: str) -> str | None:
                 if not isinstance(first_arg, ast.List):
                     return
 
-                for elt in first_arg.elts:
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                        val = elt.value
-                        for meta in _SHELL_META:
-                            if meta in val:
-                                lineno = getattr(elt, "lineno", "?")
-                                self.error = (
-                                    f"[L{lineno}] Dangerous "
-                                    f"subprocess.{node.func.attr}() detected\n"
-                                    f"  Problem: shell=True with list argument "
-                                    f"containing shell meta-character '{meta}'\n"
-                                    f"           ({val!r})\n"
-                                    f"  Result: The process will hang indefinitely\n"
-                                    f"  BAD: subprocess.run(['cmd', '{meta}'], shell=True)\n"
-                                    f"  GOOD: subprocess.run(['cmd'], capture_output=True)\n"
-                                )
-                                return
+                # Quote the first element that a shell would treat specially:
+                # these are the arguments the call site most likely meant to
+                # pass and the shell will silently ignore.
+                suspect = next(
+                    (
+                        str(elt.value)
+                        for elt in first_arg.elts
+                        if isinstance(elt, ast.Constant)
+                        and isinstance(elt.value, str)
+                        and any(meta in elt.value for meta in _SHELL_META)
+                    ),
+                    first_arg.elts[0] if first_arg.elts else "",
+                )
+                lineno = getattr(node, "lineno", "?")
+                self.error = (
+                    f"[L{lineno}] subprocess.{node.func.attr}(..., shell=True) "
+                    f"was NOT run\n"
+                    f"  Problem: shell=True takes one command *string*, so the "
+                    f"remaining list items are ignored\n"
+                    f"           ({suspect!r} would be dropped or mishandled)\n"
+                    f"  Result: the command runs differently from what the code says "
+                    f"(it does not hang)\n"
+                    f"  BAD: subprocess.run(['cmd', '--flag'], shell=True)\n"
+                    f"  GOOD: subprocess.run(['cmd', '--flag'])\n"
+                    f"        subprocess.run('cmd --flag', shell=True)  # "
+                    f"single string, if a shell is really wanted\n"
+                )
+                return
             self.generic_visit(node)
 
     c = _Checker()
@@ -137,6 +174,10 @@ def execute_python(
 
     Runs without a timeout by design; the user interrupts with Ctrl+C.
 
+    Code that calls ``subprocess`` with ``shell=True`` and an argv list is
+    refused before anything runs (see ``_check_shell_true_with_list``), because
+    the shell would ignore everything after the first element.
+
     Args:
         code: The Python code to execute.
 
@@ -146,10 +187,11 @@ def execute_python(
     Raises:
         KeyboardInterrupt: If the user interrupts the execution (Ctrl+C).
     """
-    # Static check: detect dangerous subprocess patterns
-    danger = _check_dangerous_subprocess(code)
-    if danger:
-        return ToolError(error=danger)
+    # Refuse subprocess calls whose argv list would be ignored by the shell,
+    # rather than running code that does not do what it looks like it does.
+    refusal = _check_shell_true_with_list(code)
+    if refusal:
+        return ToolError(error=refusal)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tmp:
         tmp_path = Path(tmp.name)

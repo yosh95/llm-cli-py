@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from llm_cli_py.models import LlmResponse, Role, ToolCall
+import pytest
+
+from llm_cli_py.models import LlmResponse, Message, Role, ToolCall
 from llm_cli_py.tools.types import ExecResult, ToolError
-from tests.conftest import register, tool_then_text
+from tests.conftest import completion, register, tool_call, tool_then_text
 
 
 def test_a_plain_answer_is_printed(turn) -> None:
@@ -73,16 +75,53 @@ def test_a_broken_tool_call_is_not_executed(session) -> None:
     assert not any(m.role == Role.TOOL for m in session.client.state.conversation)
 
 
-def test_broken_tool_calls_are_dropped_from_the_history(session) -> None:
-    """The assistant turn must not keep tool_calls that have no tool result."""
-    from llm_cli_py.models import Message
+def test_a_broken_tool_call_rolls_the_whole_turn_back(session) -> None:
+    """Neither the broken call nor a healthy sibling may survive in the history.
 
-    session.client.state.conversation.append(
-        Message(
-            role=Role.ASSISTANT,
-            content="",
-            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{"}}],
-        )
+    An assistant ``tool_calls`` entry with no matching tool result is what some
+    OpenAI-compatible APIs reject with HTTP 400 on the next request, so the whole
+    turn is discarded -- while the user's own prompt stays, so the request is
+    still in the conversation and can be asked again.
+    """
+    register(session.ctx.tool_registry, "calc")
+    response = completion(
+        tool_calls=[
+            tool_call("c1", "calc", "{}"),
+            tool_call("c2", "calc", '{"code": "pri'),  # truncated JSON
+        ]
     )
-    session._drop_broken_tool_calls_from_history([ToolCall(id="c1", name="x", arguments={}, parse_error="{")])
-    assert session.client.state.conversation[-1].tool_calls is None
+
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=response) as post:
+        session.process_and_print("Run both")
+
+    assert post.call_count == 1  # the agent loop stopped, it did not retry
+    assert [(m.role.value, m.content) for m in session.client.state.conversation] == [
+        ("user", "Run both"),
+    ]
+
+
+def test_an_interrupted_tool_call_does_not_leave_a_dangling_request(session) -> None:
+    """Ctrl+C during a tool run must not leave assistant tool_calls without results."""
+
+    def interrupted(**_kwargs: object) -> ExecResult:
+        raise KeyboardInterrupt
+
+    register(session.ctx.tool_registry, "slow", interrupted)
+    response = completion(tool_calls=[tool_call("c1", "slow", "{}")])
+
+    with (
+        patch("llm_cli_py.providers.llm_api.post_json", return_value=response),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        session.process_and_print("Run it")
+
+    assert [(m.role.value, m.content) for m in session.client.state.conversation] == [("user", "Run it")]
+
+
+def test_rolling_back_without_an_assistant_reply_does_nothing(session) -> None:
+    """``rollback_last_turn`` is a no-op when there is nothing to undo."""
+    session.client.state.conversation.append(Message(role=Role.USER, content="hello"))
+
+    session.client.rollback_last_turn()
+
+    assert [(m.role.value, m.content) for m in session.client.state.conversation] == [("user", "hello")]

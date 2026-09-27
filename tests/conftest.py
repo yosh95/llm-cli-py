@@ -29,6 +29,23 @@ def make_client(
     return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key, system_prompt=system_prompt)
 
 
+def completion(text: str | None = None, tool_calls: list[dict] | None = None) -> dict:
+    """An OpenAI-style chat-completion payload (what ``post_json`` returns)."""
+    message: dict[str, object] = {"role": "assistant", "content": text}
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    return {"choices": [{"message": message, "finish_reason": "stop"}]}
+
+
+def tool_call(call_id: str, name: str, arguments: str) -> dict:
+    """One entry of a response's ``tool_calls`` (``arguments`` is JSON text)."""
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
 def register(registry: ToolRegistry, name: str, func: ToolFunc | None = None) -> ToolRegistry:
     """Register ``func`` (default: a tool that succeeds) as tool ``name``."""
     if func is None:

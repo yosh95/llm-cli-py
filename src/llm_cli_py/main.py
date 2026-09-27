@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import logging
 import os
 import sys
 
@@ -20,7 +19,6 @@ from .consts import (
     DEFAULT_REQUEST_TIMEOUT,
     ENV_API_KEY,
     ENV_API_URL,
-    ENV_LOG_LEVEL,
     ENV_MODEL,
     ENV_SYSTEM_PROMPT,
 )
@@ -94,37 +92,23 @@ def initialize_tools() -> ToolRegistry:
     return registry
 
 
-def _configure_logging() -> None:
-    """Apply the ``LOG_LEVEL`` environment switch."""
-    log_level_str = os.environ.get(ENV_LOG_LEVEL, "").upper()
-    if log_level_str:
-        numeric_level = getattr(logging, log_level_str, None)
-        if numeric_level is not None:
-            logging.basicConfig()
-            logging.getLogger().setLevel(numeric_level)
-
-
 def _configure_streams() -> None:
     """Never die on an unencodable character: replace instead of raising.
 
     Keeps the CLI usable on consoles whose encoding (e.g. cp932 on Japanese
     Windows) cannot represent every emitted character, and removes any
-    dependency on PYTHONIOENCODING being set in the environment.
+    dependency on PYTHONIOENCODING being set in the environment. Streams that
+    cannot be reconfigured (captured/embedded ones have no ``reconfigure``) are
+    left alone.
     """
     for stream in (sys.stdout, sys.stderr):
-        # getattr keeps this working on streams that are not TextIOWrapper
-        # (e.g. captured/embedded streams) without a type error.
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            continue
-        with contextlib.suppress(Exception):
-            reconfigure(errors="replace")
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
 
 
 def main() -> None:
     """Main entry point."""
     _configure_streams()
-    _configure_logging()
 
     parser = build_parser()
     args = parser.parse_args()

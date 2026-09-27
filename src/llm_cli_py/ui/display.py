@@ -21,18 +21,11 @@ def print_rule() -> None:
     print("\u2500" * width)
 
 
-def print_block(content: str, title: str | None = None) -> None:
-    """Print content with optional title."""
-    if title:
-        print(f"{title}:")
-    text = content.strip()
-    print(text)
-
-
 def print_assistant(text: str) -> None:
     """Display the assistant's final answer with a clear, borderless label."""
     print_rule()
-    print_block(text, title="Assistant")
+    print("Assistant:")
+    print(text.strip())
 
 
 def print_thinking(model: str) -> None:
@@ -72,11 +65,6 @@ def print_tool_result(lines: list[str]) -> None:
         print(f"    {line}")
 
 
-def print_info(label: str, value: str) -> None:
-    """Print an info key-value pair."""
-    print(f"  {label}: {value}")
-
-
 def report_info(message: str) -> None:
     """Report an informational message."""
     print(f"INFO: {message}")
@@ -85,8 +73,3 @@ def report_info(message: str) -> None:
 def report_error(message: str) -> None:
     """Report an error message."""
     print(f"[ERROR] {message}")
-
-
-def report_warning(message: str) -> None:
-    """Report a warning message."""
-    print(f"[WARN] {message}")

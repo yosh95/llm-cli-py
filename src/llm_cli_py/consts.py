@@ -34,9 +34,3 @@ DEFAULT_API_URL = "http://localhost:11434/v1"
 Shown in ``--help`` and in the "not configured" error; there is no implicit
 default -- the API URL must be configured explicitly.
 """
-
-
-# ── Logging ────────────────────────────────────────────────────────
-
-ENV_LOG_LEVEL = "LOG_LEVEL"
-"""Environment variable setting the root logger level (e.g. ``DEBUG``)."""

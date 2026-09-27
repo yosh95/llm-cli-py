@@ -57,7 +57,8 @@ strict = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-# "." lets the tests import shared helpers from tests/conftest.py as a module
-# path ("tests.conftest") regardless of the working directory.
+# "." on the path (together with tests/__init__.py) is what lets the tests
+# import the shared helpers as "tests.conftest"; "src" makes the package
+# importable without an editable install.
 pythonpath = [".", "src"]
 testpaths = ["tests"]

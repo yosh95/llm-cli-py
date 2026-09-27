@@ -1,14 +1,12 @@
-"""Session handler for interactive and one-shot chat."""
+"""Session handler: one turn of chat, plus the tool executions it asks for."""
 
 from __future__ import annotations
-
-import json
 
 from .. import ui
 from ..base import LlmClient
 from ..models import ClientState, Message, Role, ToolCall
 from ..tools.registry import ToolRegistry
-from ..tools.types import ExecResult, ToolError, normalise_tool_result, render_tool_result
+from ..tools.types import ToolResult, normalise_tool_result
 
 
 def _append_tool_message(state: ClientState, content: str, tool_call_id: str) -> None:
@@ -69,91 +67,65 @@ class ActiveSession:
                 break
 
             # A tool call whose arguments were truncated/corrupted (JSON did not
-            # parse) cannot be executed safely. Surface an explicit error and
-            # leave the agent loop so the user gets back to the prompt.
+            # parse) cannot be executed safely. The turn is only usable once
+            # every tool call in it has a result, so drop the half-finished reply
+            # and leave the agent loop, returning the user to the prompt.
             if self._has_broken_tool_call(response.tool_calls):
                 ui.display.report_error(
                     "A tool call had truncated (unparseable) arguments, so it "
-                    "was NOT executed. Please try again."
+                    "was NOT executed. That turn was discarded -- please try again."
                 )
-                self._drop_broken_tool_calls_from_history(response.tool_calls)
+                self.client.rollback_last_turn()
                 break
 
-            self._handle_tool_calls(response.tool_calls)
+            try:
+                self._handle_tool_calls(response.tool_calls)
+            except KeyboardInterrupt:
+                # Ctrl+C while a tool is running leaves the same half-finished
+                # reply (tool_calls whose results were never appended); drop it
+                # before the interrupt returns the user to the prompt.
+                self.client.rollback_last_turn()
+                raise
 
     @staticmethod
     def _has_broken_tool_call(tool_calls: list[ToolCall]) -> bool:
         """Return True if any tool call has unparseable (truncated) arguments."""
         return any(tc.parse_error is not None for tc in tool_calls)
 
-    def _drop_broken_tool_calls_from_history(self, tool_calls: list[ToolCall]) -> None:
-        """Remove the just-recorded broken tool calls from conversation history.
-
-        Leaving truncated tool_calls on the last assistant message makes the next
-        request carry assistant tool_calls with no matching tool result, which
-        some OpenAI-compatible APIs reject with HTTP 400. Drop them so the user
-        can simply retry with a clean assistant message.
-        """
-        broken_ids = {tc.id for tc in tool_calls if tc.parse_error is not None}
-        for msg in reversed(self.client.state.conversation):
-            if msg.role != Role.ASSISTANT or not msg.tool_calls:
-                continue
-            msg.tool_calls = [tc for tc in msg.tool_calls if tc.get("id") not in broken_ids]
-            if not msg.tool_calls:
-                msg.tool_calls = None
-            break
-
     @staticmethod
-    def _format_tool_argument(name: str, value: object) -> list[str]:
-        """Format one tool-call argument as indented display lines.
+    def _format_tool_arguments(arguments: dict[str, object]) -> list[str]:
+        """Format tool-call arguments as the indented lines shown under ``Args:``.
 
-        Short values stay on a single ``[name] value`` line so simple calls
-        read at a glance. Values that span several lines (``code`` being the
-        obvious case) get a ``[name]`` label of their own and are reproduced
-        verbatim underneath, so the code keeps the indentation it was written
-        with instead of being mangled into one long line. The caller prints
-        the ``Args:`` header that opens the block.
+        Short values stay on a single ``[name] value`` line so simple calls read
+        at a glance. Values that span several lines (``code`` being the obvious
+        case) get a ``[name]`` label of their own and are reproduced verbatim
+        underneath, so the code keeps the indentation it was written with
+        instead of being mangled into one long line.
         """
-        text = value if isinstance(value, str) else str(value)
-        # Code is almost always written with a trailing newline; dropping it
-        # first keeps the block from ending on an empty indented line and lets
-        # one-line code stay on a single ``[name] value`` line.
-        lines = text.rstrip("\n").split("\n")
-        if len(lines) == 1:
-            return [f"  [{name}] {lines[0]}"]
-
-        formatted = [f"  [{name}]"]
-        formatted.extend(f"    {line}" for line in lines)
-        return formatted
-
-    @classmethod
-    def _format_tool_arguments(cls, arguments: dict[str, object]) -> list[str] | None:
-        """Format tool-call parameters for terminal display (all shown in full)."""
-        if not arguments:
-            return None
-
         lines: list[str] = []
         for name, value in arguments.items():
-            lines.extend(cls._format_tool_argument(name, value))
+            text = value if isinstance(value, str) else str(value)
+            # Code is almost always written with a trailing newline; dropping it
+            # first keeps the block from ending on an empty indented line and
+            # lets one-line code stay on a single ``[name] value`` line.
+            value_lines = text.rstrip("\n").split("\n")
+            if len(value_lines) == 1:
+                lines.append(f"  [{name}] {value_lines[0]}")
+                continue
+            lines.append(f"  [{name}]")
+            lines.extend(f"    {line}" for line in value_lines)
         return lines
 
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
+            ui.display.print_tool_call(tc.name, self._format_tool_arguments(tc.arguments))
+
             tool = self.ctx.tool_registry.get(tc.name)
-
-            ui.display.print_tool_call(
-                tc.name,
-                self._format_tool_arguments(tc.arguments) or [],
-            )
-
-            if not tool:
-                ui.display.report_error(f"Tool '{tc.name}' not found")
-                _append_tool_message(
-                    self.client.state,
-                    f"Tool '{tc.name}' not found",
-                    tc.id,
-                )
+            if tool is None:
+                message = f"Tool '{tc.name}' not found"
+                ui.display.report_error(message)
+                _append_tool_message(self.client.state, message, tc.id)
                 continue
 
             try:
@@ -166,8 +138,6 @@ class ActiveSession:
             # A tool that returned something other than ExecResult/ToolError is
             # a programming error; normalise it into a ToolError instead of
             # silently treating the value as a successful result.
-            normalised: ExecResult | ToolError = normalise_tool_result(result)
-            content_str = json.dumps(normalised.to_dict(), ensure_ascii=False)
-
-            ui.display.print_tool_result(render_tool_result(content_str))
-            _append_tool_message(self.client.state, content_str, tc.id)
+            normalised: ToolResult = normalise_tool_result(result)
+            ui.display.print_tool_result(normalised.as_display_lines())
+            _append_tool_message(self.client.state, normalised.as_tool_content(), tc.id)

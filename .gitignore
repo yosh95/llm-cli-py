@@ -23,7 +23,3 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-
-# Local session log / prompt history
-**/.llm_cli_chat_log
-**/.llm_cli_prompt_history

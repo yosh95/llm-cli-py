@@ -28,15 +28,16 @@ typecheck:  ## Run mypy (static type checking)
 test:   ## Run pytest
 	$(PYTHON) -m pytest -v
 
-install:
+install:  ## Install into the current environment (no venv is created)
 	$(PYTHON) -m pip install -e "$(PROJECT_DIR)"
 
-install-dev:
+install-dev:  ## Same, plus the dev tools (pytest, ruff, mypy)
 	$(PYTHON) -m pip install -e "$(PROJECT_DIR)[dev]"
 
-check-all: format check typecheck test
+check-all:  ## Run format, check, typecheck and test in that order
+	$(MAKE) format check typecheck test
 
-clean:  ## Remove intermediate artifacts (keeps $(VENV))
+clean:  ## Remove caches, build artifacts and $(VENV)
 	@echo "Removing __pycache__ directories..."
 	find . -type d -name __pycache__ -not -path './$(VENV)/*' -exec rm -rf {} +
 	@echo "Removing tool caches..."
@@ -45,11 +46,9 @@ clean:  ## Remove intermediate artifacts (keeps $(VENV))
 	rm -rf dist/ build/
 	@echo "Removing egg-info..."
 	rm -rf src/*.egg-info/
-	@echo "Kept $(VENV) (use 'make clean-all' to remove it)."
-	@echo "Done."
-
-clean-all:  ## Same as clean, and also remove $(VENV)
-	$(MAKE) clean
 	@echo "Removing $(VENV)..."
 	rm -rf $(VENV)
 	@echo "Done."
+
+clean-all:  ## Alias of clean
+	$(MAKE) clean

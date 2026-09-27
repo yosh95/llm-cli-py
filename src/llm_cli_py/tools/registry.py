@@ -20,15 +20,15 @@ class Tool:
         parameters: dict[str, object],
         func: ToolFunc,
     ) -> None:
-        self.name = name
-        self.description = description
-        self.parameters = parameters
-        self.func = func
+        # The schema is the only copy of the name/description/parameters: it is
+        # exactly what gets advertised to the model, so there is nothing else to
+        # keep in sync as well.
         self.schema = ToolSchema(
             name=name,
             description=description,
             parameters=parameters,
         )
+        self.func = func
 
 
 class ToolRegistry:
@@ -61,10 +61,6 @@ class ToolRegistry:
     def get_schemas(self) -> list[ToolSchema]:
         """Get all tool schemas for API requests."""
         return [t.schema for t in self._tools.values()]
-
-    def get_tool_names(self) -> list[str]:
-        """Get sorted list of registered tool names."""
-        return sorted(self._tools.keys())
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools

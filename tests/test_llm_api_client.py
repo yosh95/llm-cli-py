@@ -8,29 +8,18 @@ import pytest
 
 from llm_cli_py.models import Message, Role, ToolSchema
 from llm_cli_py.utils.http import HttpError
-from tests.conftest import make_client
-
-
-def _completion(text: str | None = "Answer", tool_calls: list[dict] | None = None) -> dict:
-    message: dict[str, object] = {"role": "assistant", "content": text}
-    if tool_calls is not None:
-        message["tool_calls"] = tool_calls
-    return {"choices": [{"message": message, "finish_reason": "stop"}]}
+from tests.conftest import completion, make_client, tool_call
 
 
 def _tool_call(arguments: str = '{"code": "print(1)"}') -> dict:
-    return {
-        "id": "call_1",
-        "type": "function",
-        "function": {"name": "execute_python", "arguments": arguments},
-    }
+    return tool_call("call_1", "execute_python", arguments)
 
 
 def test_request_targets_chat_completions_with_the_prompt_and_tools() -> None:
     client = make_client("gpt-4o")
     schema = ToolSchema(name="execute_python", description="Run Python", parameters={"type": "object"})
 
-    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion()) as post:
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion("Answer")) as post:
         result = client.send("hello", [schema])
 
     url, body = post.call_args.args[0], post.call_args.args[1]
@@ -45,7 +34,7 @@ def test_request_targets_chat_completions_with_the_prompt_and_tools() -> None:
 
 def test_the_system_prompt_is_seeded_as_the_first_message() -> None:
     client = make_client(system_prompt="You are a test assistant.")
-    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion()) as post:
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion("ok")) as post:
         client.send("hello", [])
 
     assert post.call_args.args[1]["messages"][0] == {
@@ -56,7 +45,7 @@ def test_the_system_prompt_is_seeded_as_the_first_message() -> None:
 
 def test_the_answer_is_recorded_in_the_conversation() -> None:
     client = make_client()
-    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion("Hi there")):
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion("Hi there")):
         client.send("hello", [])
 
     assert [(m.role.value, m.content) for m in client._state.conversation] == [
@@ -67,7 +56,7 @@ def test_the_answer_is_recorded_in_the_conversation() -> None:
 
 def test_tool_calls_are_parsed_and_replayed_as_json_strings() -> None:
     client = make_client()
-    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion(None, [_tool_call()])):
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion(None, [_tool_call()])):
         result = client.send("run it", [])
 
     (tc,) = result.tool_calls
@@ -85,7 +74,7 @@ def test_unparseable_tool_arguments_are_reported_as_a_parse_error() -> None:
     client = make_client()
     with patch(
         "llm_cli_py.providers.llm_api.post_json",
-        return_value=_completion(None, [_tool_call('{"code": "pri')]),
+        return_value=completion(None, [_tool_call('{"code": "pri')]),
     ):
         result = client.send("run it", [])
 

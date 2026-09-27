@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat API client (POST {api_url}/chat/completions)."""
+"""OpenAI-compatible chat API client (POST {base_url}/chat/completions)."""
 
 from __future__ import annotations
 
@@ -29,14 +29,11 @@ class LlmApiClient(LlmClient):
         system_prompt: str = "",
     ) -> None:
         super().__init__(model, system_prompt=system_prompt)
-        self._api_url = api_url.rstrip("/")
+        # The one endpoint this client talks to is fixed at construction, so the
+        # base URL is never needed again (and a trailing "/" is harmless).
+        self._endpoint = api_url.rstrip("/") + "/chat/completions"
         self._api_key = api_key or ""
         self._timeout = timeout
-
-    @property
-    def api_url(self) -> str:
-        """Return the configured API base URL."""
-        return self._api_url
 
     def _build_messages(self) -> list[dict[str, object]]:
         """Build the messages array for the API request.
@@ -146,23 +143,24 @@ class LlmApiClient(LlmClient):
         """Append the assistant response (text/tool_calls) to the history."""
         if not (result.text or result.tool_calls):
             return
-        tool_calls_data: list[ToolCallPayload] | None = None
-        if result.tool_calls:
-            tool_calls_data = []
-            for tc in result.tool_calls:
-                tool_calls_data.append(
-                    ToolCallPayload(
-                        id=tc.id,
-                        type="function",
-                        function={
-                            "name": tc.name,
-                            # OpenAI-compatible APIs require arguments to be a
-                            # JSON-encoded string, not a nested object, when the
-                            # assistant's tool call is replayed back in later requests.
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                        },
-                    )
+        tool_calls_data: list[ToolCallPayload] | None = (
+            [
+                ToolCallPayload(
+                    id=tc.id,
+                    type="function",
+                    function={
+                        "name": tc.name,
+                        # OpenAI-compatible APIs require arguments to be a
+                        # JSON-encoded string, not a nested object, when the
+                        # assistant's tool call is replayed back in later requests.
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                    },
                 )
+                for tc in result.tool_calls
+            ]
+            if result.tool_calls
+            else None
+        )
 
         self._state.conversation.append(
             Message(
@@ -194,7 +192,7 @@ class LlmApiClient(LlmClient):
         messages = self._build_messages()
         body = self._build_request(messages, tool_schemas)
         payload = post_json(
-            self._api_url + "/chat/completions",
+            self._endpoint,
             body,
             self._timeout,
             api_key=self._api_key,

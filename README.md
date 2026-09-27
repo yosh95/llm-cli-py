@@ -14,8 +14,9 @@ Python-execution tool.
 - **No provider lock-in** — capabilities are described in `LLM_CLI_SYSTEM_PROMPT`,
   so the agent calls APIs itself via `execute_python`; switch providers by
   editing an env var
-- **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn per line
-- **One-shot mode** — pass a prompt and the process answers once and exits
+- **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn
+  per line, kept open until you end it (Ctrl+D); a prompt on the command line is
+  answered first, then the same prompt continues
 - **Minimal dependencies** — `requests`, `prompt_toolkit`
 
 ## Install
@@ -29,10 +30,14 @@ python -m pip install -e .
 Or, without activating anything:
 
 ```bash
-make install        # installs into .venv
-make install-dev    # .venv + dev tools (pytest, ruff, mypy)
+make install        # pip install -e . into the current environment
+make install-dev    # the same, plus the dev tools (pytest, ruff, mypy)
 pipx install -e .   # global, independent of .venv
 ```
+
+`make install` does not create a virtual environment: activate one first (as
+above) or let `pipx` own it. `make clean` deletes `$(VENV)` (`.venv` by
+default).
 
 On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
 (`sudo apt install python3-venv`).
@@ -44,7 +49,7 @@ export LLM_CLI_API_URL="http://localhost:11434/v1"   # required: any OpenAI-comp
 export LLM_CLI_API_KEY="your-api-key"                # optional for local instances
 export LLM_CLI_MODEL="gpt-4o"                        # optional, or use -m
 
-llm-cli-py -m gpt-4o "What is the capital of France?"   # one-shot prompt
+llm-cli-py -m gpt-4o "What is the capital of France?"   # answer, then keep prompting
 llm-cli-py -m gpt-4o -s "Summarize this:" -s "$(cat README.md)"
 llm-cli-py -m gpt-4o                                   # interactive
 ```
@@ -65,9 +70,11 @@ Summarize this`. Read any file yourself with a shell
 substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
 `execute_python`.
 
-There are no slash commands, no prompt history and no stdin piping: every line
-you type at the `> ` prompt is sent to the model as a new turn. A line starting
-with `/` is ordinary prompt text, so nothing needs escaping.
+There are no slash commands and no stdin piping: input is read from the terminal
+by `prompt_toolkit` (a pipe is not a source of turns), the prompt keeps no
+history -- the arrow keys do not bring an earlier line back -- and every line you
+type at the `> ` prompt is sent to the model as a new turn. A line starting with
+`/` is ordinary prompt text, so nothing needs escaping.
 
 End the session with end-of-input -- **Ctrl+D** on Linux/macOS, **Ctrl+Z then
 Enter** on Windows (that is where the terminal reports end-of-file; Windows has
@@ -95,7 +102,6 @@ llm-cli-py -m gpt-4o "Write a haiku about JSON" > haiku.txt
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
 | `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
-| `LOG_LEVEL` | Root logger level (e.g. `DEBUG`, `INFO`). |
 
 ### Example: Web Search Without a Search Tool
 
@@ -127,22 +133,28 @@ A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as
 output.
 
+Code is also refused, before it runs, when it calls `subprocess` with
+`shell=True` and an argv list: the shell executes only the first element and
+silently ignores the rest, so the command would not do what the code says.
+
 ## Development
 
 ```bash
-make install-dev   # create .venv + pip install -e ".[dev]"
+make install-dev   # pip install -e ".[dev]" (no venv is created)
 make test          # pytest -v
 make check         # ruff check
 make format        # ruff format
 make typecheck     # mypy
 make check-all     # format + check + typecheck + test
-make clean         # remove caches and build artifacts (keeps .venv)
-make clean-all     # clean, and remove .venv too
+make clean         # remove caches, build artifacts and .venv
+make clean-all     # alias of clean
 ```
 
-`pyproject.toml` keeps `dependencies = []` on purpose: the package runs on the
-standard library alone. Dev tools live under the `dev` extra; there is no lock
-file, so pin exact versions with `==` if you need reproducible installs.
+Run `make help` for the same list with one-line descriptions. The runtime
+dependencies are `requests` and `prompt_toolkit` (declared in `pyproject.toml`);
+everything else is the standard library. Dev tools live under the `dev` extra;
+there is no lock file, so pin exact versions with `==` if you need reproducible
+installs.
 
 ## License
 

@@ -19,17 +19,34 @@ class LlmClient(ABC):
         other embedders can construct a client without touching ``os.environ``.
         It is intentionally NOT re-read per request: mid-session changes would
         make later turns inconsistent with earlier context. When empty, no
-        system message is seeded (no default/date prompt is injected).
+        system message is seeded (no default/date prompt is injected), and the
+        seeded message is the only place the prompt is kept.
         """
         self._state = ClientState(
             model=model,
-            system_prompt=system_prompt,
             conversation=([Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else []),
         )
 
     @property
     def state(self) -> ClientState:
         return self._state
+
+    def rollback_last_turn(self) -> None:
+        """Discard the assistant reply recorded for the current turn.
+
+        Used when a turn cannot be finished -- a tool call whose arguments did
+        not parse, or a tool run the user interrupted -- because what was
+        recorded is then an assistant message whose ``tool_calls`` have no
+        results, the one shape some OpenAI-compatible APIs reject with HTTP 400
+        on the next request. The user's own prompt is kept: the question stays in
+        the conversation and can simply be asked again. A no-op when no assistant
+        message has been recorded (nothing to undo).
+        """
+        conversation = self._state.conversation
+        for index in range(len(conversation) - 1, -1, -1):
+            if conversation[index].role is Role.ASSISTANT:
+                del conversation[index:]
+                return
 
     @abstractmethod
     def send(
@@ -44,8 +61,3 @@ class LlmClient(ABC):
             tool_schemas: Tool schemas to advertise.
         """
         ...
-
-    @property
-    def api_url(self) -> str:
-        """Return the API base URL this client connects to."""
-        raise NotImplementedError
