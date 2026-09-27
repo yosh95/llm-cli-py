@@ -178,8 +178,8 @@ def execute_python(
         return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
     except KeyboardInterrupt:
         # Kill the child and everything it spawned, reap it, then let the
-        # interrupt continue to the caller (the session loop prints its usual
-        # "Use /quit to exit" notice and returns to the prompt).
+        # interrupt continue to the caller (the session loop silently returns
+        # to the prompt).
         if proc is not None and proc.poll() is None:
             _kill_process_group(proc)
             with contextlib.suppress(Exception):

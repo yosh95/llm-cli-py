@@ -40,23 +40,6 @@ def print_thinking(model: str) -> None:
     print(f"{model} is thinking...")
 
 
-def stream_start(title: str) -> None:
-    """Emit the opening label for a streaming answer block."""
-    print_rule()
-    print(title)
-    print("", end="", flush=True)
-
-
-def stream_text(delta: str) -> None:
-    """Print an incremental text delta without a trailing newline (live)."""
-    print(delta, end="", flush=True)
-
-
-def stream_end() -> None:
-    """Terminate a streaming line with a newline."""
-    print("", flush=True)
-
-
 def print_tool_call(name: str, arg_lines: list[str]) -> None:
     """Print a tool invocation and its arguments.
 

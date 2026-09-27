@@ -6,28 +6,18 @@ import json
 
 from .. import ui
 from ..base import LlmClient
-from ..models import ClientState, DataSource, LlmResponse, Message, Role, ToolCall, ToolSchema
+from ..models import ClientState, Message, Role, ToolCall
 from ..tools.registry import ToolRegistry
 from ..tools.types import ExecResult, ToolError, normalise_tool_result, render_tool_result
-from ..utils.timeutil import now_iso
-from .stream_state import StreamState
 
 
 def _append_tool_message(state: ClientState, content: str, tool_call_id: str) -> None:
-    """Add a tool result to the conversation and persist the history immediately.
+    """Add a tool result to the conversation.
 
-    Tool output is part of the record, so it is timestamped and pushed to the
-    chat log right away (same as user/assistant messages).
+    Tool output is part of the record the model reasons over, exactly like a
+    user or assistant message.
     """
-    state.conversation.append(
-        Message(
-            role=Role.TOOL,
-            content=content,
-            tool_call_id=tool_call_id,
-            timestamp=now_iso(),
-        )
-    )
-    state.notify_changed()
+    state.conversation.append(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
 
 
 class SessionContext:
@@ -51,12 +41,12 @@ class ActiveSession:
         self.client = client
         self.ctx = ctx
 
-    def process_and_print(self, data: list[DataSource]) -> None:
+    def process_and_print(self, prompt: str) -> None:
         """Main processing loop: send to LLM, handle tool calls, display results."""
         if not self.client.state.model:
             ui.display.report_info("No model specified locally.")
 
-        current_data = data
+        current_prompt = prompt
 
         while True:
             tool_schemas = self.ctx.tool_registry.get_schemas()
@@ -65,28 +55,22 @@ class ActiveSession:
             ui.display.print_rule()
             ui.display.print_thinking(display_model)
 
-            stream_state = StreamState()
-
             try:
-                response = self._send_streamed(
-                    current_data,
-                    tool_schemas,
-                    stream_state,
-                )
+                response = self.client.send(current_prompt, tool_schemas)
             except Exception as e:
                 ui.display.report_error(f"LLM request failed: {e}")
                 break
-            current_data = []
+            current_prompt = ""
 
-            self._finalize_streamed(stream_state, response)
+            if response.text:
+                ui.display.print_assistant(response.text)
 
             if not response.tool_calls:
                 break
 
-            # A tool call whose arguments are truncated/corrupted (JSON did not
-            # parse) cannot be executed safely. Print what we already streamed,
-            # surface an explicit error, and leave the agent loop so the user
-            # gets back to the prompt.
+            # A tool call whose arguments were truncated/corrupted (JSON did not
+            # parse) cannot be executed safely. Surface an explicit error and
+            # leave the agent loop so the user gets back to the prompt.
             if self._has_broken_tool_call(response.tool_calls):
                 ui.display.report_error(
                     "A tool call had truncated (unparseable) arguments, so it "
@@ -96,36 +80,6 @@ class ActiveSession:
                 break
 
             self._handle_tool_calls(response.tool_calls)
-
-    def _send_streamed(
-        self,
-        data: list[DataSource],
-        tool_schemas: list[ToolSchema],
-        state: StreamState,
-    ) -> LlmResponse:
-        """Send a streaming turn, displaying answer deltas live."""
-
-        def on_text(delta: str) -> None:
-            if not state.answer_open:
-                ui.display.stream_start("Assistant:")
-                state.answer_open = True
-            ui.display.stream_text(delta)
-
-        return self.client.send(
-            data,
-            tool_schemas,
-            on_text=on_text,
-        )
-
-    def _finalize_streamed(self, state: StreamState, response: LlmResponse) -> None:
-        """Close open streaming blocks and show any missed output.
-
-        If a provider produced no deltas, display the accumulated response once here.
-        """
-        if state.answer_open:
-            ui.display.stream_end()
-        elif response.text:
-            ui.display.print_assistant(response.text)
 
     @staticmethod
     def _has_broken_tool_call(tool_calls: list[ToolCall]) -> bool:
@@ -139,11 +93,6 @@ class ActiveSession:
         request carry assistant tool_calls with no matching tool result, which
         some OpenAI-compatible APIs reject with HTTP 400. Drop them so the user
         can simply retry with a clean assistant message.
-
-        The repair is made in place, so the change listener is notified again to
-        re-flush the chat log: the persisted history must stay identical to the
-        in-memory one (otherwise the log keeps an assistant turn the session no
-        longer believes in).
         """
         broken_ids = {tc.id for tc in tool_calls if tc.parse_error is not None}
         for msg in reversed(self.client.state.conversation):
@@ -153,7 +102,6 @@ class ActiveSession:
             if not msg.tool_calls:
                 msg.tool_calls = None
             break
-        self.client.state.notify_changed()
 
     @staticmethod
     def _format_tool_argument(name: str, value: object) -> list[str]:

@@ -1,99 +1,82 @@
-"""Tests for the shared HTTP retry utility."""
+"""Tests for the stdlib HTTP POST helper (no network: the transport is patched)."""
 
 from __future__ import annotations
 
+import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
-from llm_cli_py.utils.http import post_with_retries
+from llm_cli_py.utils.http import HttpError, post_json
 
 
-class TestPostWithRetries:
-    """Test the shared POST-with-retry utility."""
+class _Response:
+    """A minimal ``urlopen`` result: a context manager with ``read()``."""
 
-    def test_success_first_try(self) -> None:
-        session = MagicMock(spec=requests.Session)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        session.post.return_value = mock_resp
+    def __init__(self, payload: object) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
 
-        result = post_with_retries(session, "https://example.com/api", {"q": 1}, 30)
-        assert result is mock_resp
-        session.post.assert_called_once()
+    def read(self) -> bytes:
+        return self._body
 
-    @pytest.mark.parametrize("status_code", [429, 503])
-    def test_retries_on_transient_status(self, status_code: int) -> None:
-        session = MagicMock(spec=requests.Session)
-        mock_fail = MagicMock(status_code=status_code)
-        mock_ok = MagicMock(status_code=200)
-        session.post.side_effect = [mock_fail, mock_ok]
+    def __enter__(self) -> _Response:
+        return self
 
-        with patch("llm_cli_py.utils.http.time.sleep"):
-            assert post_with_retries(session, "https://example.com/api", {"q": 1}, 30) is mock_ok
+    def __exit__(self, *_exc: object) -> None:
+        return None
 
-    @pytest.mark.parametrize(
-        ("exc", "max_retries"),
-        [
-            (requests.exceptions.Timeout("timed out"), 3),
-            (requests.exceptions.ConnectionError("refused"), 2),
-        ],
+
+def _http_error(code: int, reason: str, body: object) -> urllib.error.HTTPError:
+    raw = json.dumps(body).encode("utf-8")
+    return urllib.error.HTTPError(
+        url="https://api.example.com/v1/chat/completions",
+        code=code,
+        msg=reason,
+        hdrs=MagicMock(),  # type: ignore[arg-type]
+        fp=MagicMock(read=lambda: raw),
     )
-    def test_exhausted_retries_raise_the_last_exception(self, exc, max_retries: int) -> None:
-        session = MagicMock(spec=requests.Session)
-        session.post.side_effect = exc
 
-        with (
-            patch("llm_cli_py.utils.http.time.sleep"),
-            pytest.raises(type(exc)),
-        ):
-            post_with_retries(session, "https://example.com/api", {"q": 1}, 30, max_retries=max_retries)
 
-        assert session.post.call_count == max_retries
+def test_post_sends_json_with_the_api_key_and_returns_the_body() -> None:
+    with patch(
+        "llm_cli_py.utils.http.urllib.request.urlopen", return_value=_Response({"ok": True})
+    ) as urlopen:
+        assert post_json("https://api.example.com/v1/chat/completions", {"q": 1}, 30, api_key="sk-1") == {
+            "ok": True
+        }
 
-    def test_non_retryable_http_error_raises_immediately(self) -> None:
-        session = MagicMock(spec=requests.Session)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_resp.reason = "Unauthorized"
-        mock_resp.text = '{"error": {"message": "bad credentials"}}'
-        session.post.return_value = mock_resp
+    request = urlopen.call_args.args[0]
+    assert request.method == "POST"
+    assert json.loads(request.data) == {"q": 1}
+    assert request.get_header("Content-type") == "application/json"
+    assert request.get_header("Authorization") == "Bearer sk-1"
 
-        # Non-retryable HTTPError should be raised immediately without retry
-        with (
-            patch("llm_cli_py.utils.http.time.sleep") as mock_sleep,
-            pytest.raises(requests.exceptions.HTTPError) as excinfo,
-        ):
-            post_with_retries(session, "https://example.com/api", {"q": 1}, 30, max_retries=3)
 
-        assert session.post.call_count == 1
-        mock_sleep.assert_not_called()
-        # Provider error body should be surfaced in the exception message
-        assert "bad credentials" in str(excinfo.value)
+def test_error_body_is_surfaced_in_the_exception() -> None:
+    error = _http_error(401, "Unauthorized", {"error": {"message": "bad credentials", "code": 20015}})
 
-    def test_nonn2xx_error_body_is_surfaced(self) -> None:
-        session = MagicMock(spec=requests.Session)
-        mock_resp = MagicMock()
-        mock_resp.status_code = 400
-        mock_resp.reason = "Bad Request"
-        mock_resp.text = '{"error": {"message": "Invalid request parameters.", "code": 20015}}'
-        session.post.return_value = mock_resp
+    with (
+        patch("llm_cli_py.utils.http.urllib.request.urlopen", side_effect=error) as urlopen,
+        patch("llm_cli_py.utils.http.time.sleep"),
+        pytest.raises(HttpError) as excinfo,
+    ):
+        post_json("https://api.example.com/v1/chat/completions", {}, 30)
 
-        with pytest.raises(requests.exceptions.HTTPError) as excinfo:
-            post_with_retries(session, "https://example.com/api", {"q": 1}, 30, max_retries=3)
+    assert urlopen.call_count == 1  # a 401 is not retried
+    assert "bad credentials" in str(excinfo.value)
 
-        assert "Invalid request parameters" in str(excinfo.value)
-        assert "(code: 20015)" in str(excinfo.value)
 
-    def test_custom_max_retries(self) -> None:
-        session = MagicMock(spec=requests.Session)
-        session.post.side_effect = requests.exceptions.Timeout("timeout")
+def test_transient_failure_is_retried_then_the_last_error_is_raised() -> None:
+    error = _http_error(503, "Unavailable", {"error": {"message": "down"}})
 
-        with (
-            patch("llm_cli_py.utils.http.time.sleep"),
-            pytest.raises(requests.exceptions.Timeout),
-        ):
-            post_with_retries(session, "https://example.com/api", {"q": 1}, 30, max_retries=5)
+    with (
+        patch(
+            "llm_cli_py.utils.http.urllib.request.urlopen",
+            side_effect=[error, _Response({"ok": True})],
+        ) as urlopen,
+        patch("llm_cli_py.utils.http.time.sleep") as sleep,
+    ):
+        assert post_json("https://api.example.com/v1/chat/completions", {}, 30) == {"ok": True}
 
-        assert session.post.call_count == 5
+    assert urlopen.call_count == 2 and sleep.call_count == 1

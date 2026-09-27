@@ -1,181 +1,108 @@
-"""Tests for the OpenAI-compatible API client: request building and retries."""
+"""Tests for the OpenAI-compatible API client (request body and response parsing)."""
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-import requests
 
-from llm_cli_py.models import DataSource, LlmResponse, Message, Role, ToolSchema
-from tests.conftest import (
-    TEST_URL,
-    make_client,
-    stream_response,
-    text_stream,
-    tool_call_chunk,
-)
-
-# ── Request building ──────────────────────────────────────────────
+from llm_cli_py.models import Message, Role, ToolSchema
+from llm_cli_py.utils.http import HttpError
+from tests.conftest import make_client
 
 
-def test_system_prompt_is_seeded_from_the_constructor() -> None:
-    client = make_client("gpt-4o", system_prompt="You are a test assistant.")
-    client._state.conversation.append(Message(role=Role.USER, content="Hello"))
-
-    messages = client._build_messages()
-    assert messages[0] == {"role": "system", "content": "You are a test assistant."}
-    assert messages[1] == {"role": "user", "content": "Hello"}
+def _completion(text: str | None = "Answer", tool_calls: list[dict] | None = None) -> dict:
+    message: dict[str, object] = {"role": "assistant", "content": text}
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    return {"choices": [{"message": message, "finish_reason": "stop"}]}
 
 
-def test_no_system_message_is_seeded_when_the_prompt_is_empty() -> None:
+def _tool_call(arguments: str = '{"code": "print(1)"}') -> dict:
+    return {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "execute_python", "arguments": arguments},
+    }
+
+
+def test_request_targets_chat_completions_with_the_prompt_and_tools() -> None:
     client = make_client("gpt-4o")
-    client._state.conversation = [Message(role=Role.USER, content="Hello")]
-    assert [m["role"] for m in client._build_messages()] == ["user"]
+    schema = ToolSchema(name="execute_python", description="Run Python", parameters={"type": "object"})
 
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion()) as post:
+        result = client.send("hello", [schema])
 
-def test_timestamps_are_recorded_but_never_sent() -> None:
-    """Timestamps are local metadata for the log/dump, not part of the request."""
-    client = make_client("gpt-4o", system_prompt="sys")
-    client._build_user_message([DataSource(text="Hello")])
-    client._record_assistant(LlmResponse(text="Hi there"))
-    client._state.conversation.append(Message(role=Role.TOOL, content="42", tool_call_id="call_1"))
-
-    system, user, assistant = client._state.conversation[:3]
-    assert all(m.timestamp for m in (system, user, assistant))
-    assert user.timestamp is not None
-    assert datetime.fromisoformat(user.timestamp)
-    messages = client._build_messages()
-    assert messages and json.dumps(messages, ensure_ascii=False).count("timestamp") == 0
-
-
-def test_tool_result_and_tool_call_entries_have_openai_shape() -> None:
-    client = make_client("gpt-4o")
-    client._state.conversation = [
-        Message(
-            role=Role.ASSISTANT,
-            content="",
-            tool_calls=[
-                {"id": "call_1", "type": "function", "function": {"name": "python", "arguments": "{}"}}
-            ],
-        ),
-        Message(role=Role.TOOL, content="42", tool_call_id="call_1"),
-    ]
-    assert client._build_messages() == [
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "python", "arguments": "{}"}}
-            ],
-        },
-        {"role": "tool", "tool_call_id": "call_1", "content": "42"},
-    ]
-
-
-def test_build_request_advertises_tools_and_streaming() -> None:
-    client = make_client("gpt-4o")
-    schema = ToolSchema(name="python", description="Run Python", parameters={"type": "object"})
-    body = client._build_request([{"role": "user", "content": "hi"}], [schema])
+    url, body = post.call_args.args[0], post.call_args.args[1]
+    assert url == "https://api.example.invalid/v1/chat/completions"
     assert body["model"] == "gpt-4o"
-    assert body["stream"] is True
-    assert body["tools"] == [
-        {
-            "type": "function",
-            "function": {"name": "python", "description": "Run Python", "parameters": {"type": "object"}},
-        }
+    assert body["messages"] == [{"role": "user", "content": "hello"}]
+    assert body["tools"][0]["function"]["name"] == "execute_python"
+    assert "stream" not in body
+    assert post.call_args.kwargs["api_key"] == "k"
+    assert result.text == "Answer"
+
+
+def test_the_system_prompt_is_seeded_as_the_first_message() -> None:
+    client = make_client(system_prompt="You are a test assistant.")
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion()) as post:
+        client.send("hello", [])
+
+    assert post.call_args.args[1]["messages"][0] == {
+        "role": "system",
+        "content": "You are a test assistant.",
+    }
+
+
+def test_the_answer_is_recorded_in_the_conversation() -> None:
+    client = make_client()
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion("Hi there")):
+        client.send("hello", [])
+
+    assert [(m.role.value, m.content) for m in client._state.conversation] == [
+        ("user", "hello"),
+        ("assistant", "Hi there"),
     ]
 
 
-def test_no_tools_key_when_no_schemas() -> None:
-    client = make_client("gpt-4o")
-    assert "tools" not in client._build_request([], [])
-
-
-def test_source_types_are_labelled_in_the_user_turn() -> None:
+def test_tool_calls_are_parsed_and_replayed_as_json_strings() -> None:
     client = make_client()
-    client._build_user_message(
-        [
-            DataSource(text="plain"),
-            DataSource(text="body", source_type="file"),
-            DataSource(text="page", source_type="url"),
-        ]
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=_completion(None, [_tool_call()])):
+        result = client.send("run it", [])
+
+    (tc,) = result.tool_calls
+    assert (tc.id, tc.name, tc.arguments, tc.parse_error) == (
+        "call_1",
+        "execute_python",
+        {"code": "print(1)"},
+        None,
     )
-    content = client._state.conversation[-1].content
-    assert "[File content]:\nbody" in content
-    assert "[URL content]:\npage" in content
-
-
-def test_blank_sources_are_not_appended() -> None:
-    client = make_client()
-    client._build_user_message([DataSource(text="   "), DataSource(text="")])
-    assert client._state.conversation == []
-
-
-def test_send_posts_to_chat_completions() -> None:
-    client = make_client("gpt-4o")
-    with patch(
-        "llm_cli_py.utils.http.requests.Session.post", return_value=stream_response(text_stream("Answer"))
-    ) as post:
-        result = client.send([DataSource(text="Question")], [])
-
-    assert result.text == "Answer"
-    args, kwargs = post.call_args
-    assert args[0] == f"{TEST_URL}/chat/completions"
-    assert kwargs["json"]["stream"] is True
-    assert client._state.conversation[0].role == Role.USER
-
-
-def test_replayed_tool_call_arguments_are_json_encoded() -> None:
-    client = make_client()
-    resp = stream_response([tool_call_chunk('{"code": "print(1)"}'), "data: [DONE]"])
-    with patch("llm_cli_py.utils.http.requests.Session.post", return_value=resp):
-        client.send([DataSource(text="run it")], [])
-
     calls = client._state.conversation[-1].tool_calls
-    assert calls is not None
-    assert calls[0]["function"]["arguments"] == '{"code": "print(1)"}'
+    assert calls is not None and calls[0]["function"]["arguments"] == '{"code": "print(1)"}'
 
 
-# ── Retries ───────────────────────────────────────────────────────
-
-
-def test_retries_on_rate_limit_then_succeeds() -> None:
-    client = make_client("gpt-4o")
-    rate_limited = MagicMock(status_code=429)
-    rate_limited.text = "rate limit exceeded"
-
-    with (
-        patch(
-            "llm_cli_py.utils.http.requests.Session.post",
-            side_effect=[rate_limited, stream_response(text_stream("OK"))],
-        ) as post,
-        patch("llm_cli_py.utils.http.time.sleep") as sleep,
+def test_unparseable_tool_arguments_are_reported_as_a_parse_error() -> None:
+    client = make_client()
+    with patch(
+        "llm_cli_py.providers.llm_api.post_json",
+        return_value=_completion(None, [_tool_call('{"code": "pri')]),
     ):
-        assert client.send([DataSource(text="Hi")], []).text == "OK"
+        result = client.send("run it", [])
 
-    assert post.call_count == 2 and sleep.call_count == 1
+    (tc,) = result.tool_calls
+    assert tc.arguments == {} and tc.parse_error == '{"code": "pri'
 
 
-def test_timeout_is_retried_then_raised() -> None:
-    client = make_client("gpt-4o")
+def test_a_failing_request_propagates_the_http_error() -> None:
+    client = make_client()
     with (
-        patch(
-            "llm_cli_py.utils.http.requests.Session.post",
-            side_effect=requests.exceptions.Timeout("timed out"),
-        ) as post,
-        patch("llm_cli_py.utils.http.time.sleep"),
-        pytest.raises(requests.exceptions.Timeout),
+        patch("llm_cli_py.providers.llm_api.post_json", side_effect=HttpError("401 Client Error")),
+        pytest.raises(HttpError),
     ):
-        client.send([DataSource(text="Hi")], [])
-
-    assert post.call_count == 3
+        client.send("hello", [])
 
 
-def test_context_manager_and_close_are_idempotent() -> None:
-    with make_client("gpt-4o") as client:
-        assert client.api_url == TEST_URL
-    client.close()
-    client.close()  # must not raise
+def test_tool_result_messages_use_the_openai_shape() -> None:
+    client = make_client()
+    client._state.conversation = [Message(role=Role.TOOL, content="42", tool_call_id="call_1")]
+    assert client._build_messages() == [{"role": "tool", "tool_call_id": "call_1", "content": "42"}]

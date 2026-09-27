@@ -1,30 +1,23 @@
-"""OpenAI-compatible chat API client implementation (POST {api_url}/chat/completions)."""
+"""OpenAI-compatible chat API client (POST {api_url}/chat/completions)."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from typing import Any
-
-import requests
 
 from ..base import LlmClient
 from ..consts import DEFAULT_REQUEST_TIMEOUT
-from ..models import (
-    DataSource,
-    LlmResponse,
-    Message,
-    Role,
-    ToolCall,
-    ToolCallPayload,
-    ToolSchema,
-)
-from ..utils.http import post_with_retries
-from ..utils.timeutil import now_iso
+from ..models import LlmResponse, Message, Role, ToolCall, ToolCallPayload, ToolSchema
+from ..utils.http import post_json
 
 
 class LlmApiClient(LlmClient):
-    """Client for OpenAI-compatible ``/chat/completions`` endpoint."""
+    """Client for an OpenAI-compatible ``/chat/completions`` endpoint.
+
+    One request per turn: the full answer (or the tool calls) is requested in a
+    single non-streaming call and displayed when it arrives. No HTTP session is
+    kept between turns -- each request opens and closes its own connection.
+    """
 
     def __init__(
         self,
@@ -39,42 +32,17 @@ class LlmApiClient(LlmClient):
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key or ""
         self._timeout = timeout
-        self._session = requests.Session()
-        # Do not reuse keep-alive connections. This CLI makes one sequential chat
-        # request per turn (no parallel assets), so keep-alive saves nothing while
-        # leaving a stale idle pool connection vulnerable to silent drops in the
-        # network path (NAT/proxy/cloud-LB), which makes the first request after a
-        # long idle hang until timeout. Close the connection each request instead.
-        self._session.headers["Connection"] = "close"
-        if self._api_key:
-            self._session.headers.update(
-                {
-                    "Authorization": "Bearer " + self._api_key,
-                    "Content-Type": "application/json",
-                }
-            )
-
-    def close(self) -> None:
-        """Close the underlying HTTP session."""
-        self._session.close()
 
     @property
     def api_url(self) -> str:
         """Return the configured API base URL."""
         return self._api_url
 
-    def __enter__(self) -> LlmApiClient:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
     def _build_messages(self) -> list[dict[str, object]]:
         """Build the messages array for the API request.
 
-        Only the fields the API understands are emitted. ``Message`` carries
-        extra local metadata (``timestamp``) that is intentionally dropped here:
-        it is for the chat log / ``/dump`` only and must never reach the model.
+        The conversation history is the one and only source of the request body:
+        only fields the API understands are emitted.
         """
         messages: list[dict[str, object]] = []
 
@@ -111,7 +79,6 @@ class LlmApiClient(LlmClient):
         body: dict[str, object] = {
             "model": self._state.model,
             "messages": messages,
-            "stream": True,
         }
 
         if tool_schemas:
@@ -130,127 +97,53 @@ class LlmApiClient(LlmClient):
         return body
 
     @staticmethod
-    def _parse_stream_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
-        """Parse a single streaming ``choices[0].delta`` chunk.
+    def _parse_tool_calls(raw_calls: list[dict[str, Any]]) -> list[ToolCall]:
+        """Convert the response's ``tool_calls`` array into :class:`ToolCall` values.
 
-        Returns a dict with the delta fields (``content``, ``tool_calls``).
+        ``arguments`` arrives as a JSON-encoded string. A call whose string does
+        not parse (broken or truncated by the provider) is returned with
+        ``parse_error`` set and empty ``arguments``: it must never be executed,
+        and the caller is responsible for surfacing the failure.
         """
-        choices = chunk.get("choices") or []
-        if not choices:
-            return {}
-        delta = choices[0].get("delta") or {}
-        parsed: dict[str, Any] = {}
-        content = delta.get("content")
-        if content:
-            parsed["content"] = content
-        tc = delta.get("tool_calls")
-        if tc:
-            parsed["tool_calls"] = tc
-        return parsed
-
-    def _parse_stream_response(
-        self,
-        response: requests.Response,
-        on_text: Callable[[str], None] | None = None,
-    ) -> LlmResponse:
-        """Consume an SSE stream from ``requests.Response``.
-
-        - Text deltas are printed via ``on_text`` as they arrive (live).
-        - Tool-call arguments are buffered per ``index`` and only executed
-          after the whole call is complete. If a buffered ``arguments`` string
-          does not parse as JSON (broken/malformed chunk), the ``ToolCall`` is
-          returned with ``parse_error`` set and empty ``arguments``.
-
-        Returns an :class:`LlmResponse` with the fully accumulated result.
-        """
-        text_parts: list[str] = []
-        tool_calls_map: dict[int, dict[str, Any]] = {}
-
-        for raw_line_bytes in response.iter_lines():
-            if not raw_line_bytes:
-                continue
-            raw_line = raw_line_bytes.decode("utf-8", errors="replace")
-            # SSE: each event is "data: <json>" (possibly blank / comment lines)
-            if raw_line.startswith("data:"):
-                payload = raw_line[len("data:") :].strip()
-            elif raw_line.startswith(":"):
-                continue  # SSE comment line
-            else:
-                payload = raw_line
-
-            if not payload or payload == "[DONE]":
-                continue
-
-            try:
-                chunk = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-
-            delta = self._parse_stream_chunk(chunk)
-            if not delta:
-                continue
-
-            content = delta.get("content")
-            if content:
-                text_parts.append(content)
-                if on_text:
-                    on_text(content)
-
-            for tc in delta.get("tool_calls") or []:
-                index = tc.get("index", 0)
-                entry = tool_calls_map.setdefault(
-                    index,
-                    {"id": tc.get("id") or "", "name": "", "arguments": ""},
-                )
-                fn = tc.get("function") or {}
-                if tc.get("id"):
-                    entry["id"] = tc["id"]
-                if fn.get("name"):
-                    entry["name"] = fn["name"]
-                # arguments stream as JSON fragments -> concatenate
-                if fn.get("arguments"):
-                    entry["arguments"] += fn["arguments"]
-
         tool_calls: list[ToolCall] = []
-        for index in sorted(tool_calls_map):
-            entry = tool_calls_map[index]
-            args_raw = entry["arguments"]
+        for index, call in enumerate(raw_calls):
+            fn = call.get("function") or {}
+            args_raw = fn.get("arguments") or ""
             parse_error: str | None = None
             try:
                 arguments: dict[str, Any] = json.loads(args_raw) if args_raw else {}
             except json.JSONDecodeError:
-                # Malformed / truncated chunk: never executable, so surface it
-                # via parse_error instead of guessing at arguments.
                 arguments = {}
                 parse_error = args_raw
             tool_calls.append(
                 ToolCall(
-                    id=entry["id"] or f"call_{index}",
-                    name=entry["name"],
+                    id=call.get("id") or f"call_{index}",
+                    name=fn.get("name") or "",
                     arguments=arguments,
                     parse_error=parse_error,
                 )
             )
+        return tool_calls
 
-        return LlmResponse(text="".join(text_parts) or None, tool_calls=tool_calls)
+    def _parse_response(self, payload: dict[str, Any]) -> LlmResponse:
+        """Turn a chat-completion response body into an :class:`LlmResponse`."""
+        choices = payload.get("choices") or []
+        if not choices:
+            return LlmResponse()
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        return LlmResponse(
+            text=content or None,
+            tool_calls=self._parse_tool_calls(message.get("tool_calls") or []),
+        )
 
-    def _build_user_message(self, data: list[DataSource]) -> None:
-        """Append the user turn built from ``data`` to the conversation state."""
-        user_content = ""
-        for ds in data:
-            if ds.source_type == "text":
-                user_content += ds.text + "\n"
-            elif ds.source_type == "file":
-                user_content += "[File content]:\n" + ds.text + "\n"
-            elif ds.source_type == "url":
-                user_content += "[URL content]:\n" + ds.text + "\n"
-        if user_content.strip():
-            self._state.conversation.append(
-                Message(role=Role.USER, content=user_content.strip(), timestamp=now_iso())
-            )
+    def _build_user_message(self, prompt: str) -> None:
+        """Append the user turn carrying ``prompt`` verbatim to the conversation."""
+        if prompt.strip():
+            self._state.conversation.append(Message(role=Role.USER, content=prompt.strip()))
 
     def _record_assistant(self, result: LlmResponse) -> None:
-        """Append the assistant response (text/reasoning/tool_calls) to history."""
+        """Append the assistant response (text/tool_calls) to the history."""
         if not (result.text or result.tool_calls):
             return
         tool_calls_data: list[ToolCallPayload] | None = None
@@ -276,52 +169,37 @@ class LlmApiClient(LlmClient):
                 role=Role.ASSISTANT,
                 content=result.text or "",
                 tool_calls=tool_calls_data,
-                timestamp=now_iso(),
             )
         )
 
     def send(
         self,
-        data: list[DataSource],
+        prompt: str,
         tool_schemas: list[ToolSchema],
-        on_text: Callable[[str], None] | None = None,
     ) -> LlmResponse:
-        """Send a streaming chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
+        """Send one chat request to the OpenAI-compatible ``/chat/completions`` endpoint.
 
         Args:
-            data: User input sources for this turn.
+            prompt: The user's prompt text for this turn, sent verbatim.
             tool_schemas: Tool schemas to advertise (always sent, since this CLI
                 enables ``execute_python`` by default).
-            on_text: Optional callback invoked with each text delta (streaming).
 
         Returns:
-            An :class:`LlmResponse`. Tool-call arguments are buffered until
-            complete. If a streamed tool call does not parse as JSON (broken
-            chunks), its ``ToolCall.parse_error`` is set and ``arguments`` is
-            empty; the caller is responsible for surfacing the failure (no
-            silent non-streaming fallback).
+            An :class:`LlmResponse`. If a tool call's ``arguments`` string does
+            not parse as JSON, its ``ToolCall.parse_error`` is set and
+            ``arguments`` is empty; the caller surfaces the failure.
         """
-        self._build_user_message(data)
-        # The user's turn is now in the history: flush it to the chat log right
-        # away so it survives even if this request never returns (crash, kill).
-        self.state.notify_changed()
+        self._build_user_message(prompt)
 
         messages = self._build_messages()
         body = self._build_request(messages, tool_schemas)
-
-        resp = post_with_retries(
-            self._session,
+        payload = post_json(
             self._api_url + "/chat/completions",
             body,
             self._timeout,
-            stream=True,
+            api_key=self._api_key,
         )
 
-        result = self._parse_stream_response(
-            resp,
-            on_text=on_text,
-        )
-
+        result = self._parse_response(payload)
         self._record_assistant(result)
-        self.state.notify_changed()
         return result

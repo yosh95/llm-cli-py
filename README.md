@@ -2,8 +2,8 @@
 
 **Unified OpenAI-Compatible CLI for AI Agents (Python Edition)**
 
-A small command-line client for any OpenAI-compatible LLM API, with streaming
-output and a built-in Python-execution tool.
+A small command-line client for any OpenAI-compatible LLM API, with a built-in
+Python-execution tool. **Standard library only** -- no runtime dependencies.
 
 ## Features
 
@@ -14,8 +14,9 @@ output and a built-in Python-execution tool.
 - **No provider lock-in** — capabilities are described in `LLM_CLI_SYSTEM_PROMPT`,
   so the agent calls APIs itself via `execute_python`; switch providers by
   editing an env var
-- **Interactive session** — persistent chat with history and slash commands
-- **Always streaming** — answer tokens are rendered live as they arrive
+- **Interactive session** — a plain `> ` prompt (`input()`), one turn per line
+- **One-shot mode** — pass a prompt and the process answers once and exits
+- **Zero dependencies** — `urllib.request`, `input()`, `subprocess`; nothing to install
 
 ## Install
 
@@ -33,6 +34,9 @@ make install-dev    # .venv + dev tools (pytest, ruff, mypy)
 pipx install -e .   # global, independent of .venv
 ```
 
+The runtime needs nothing else: no `requests`, no `prompt_toolkit`, no TOML
+writer. Only the dev extra (pytest, ruff, mypy) installs anything.
+
 On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
 (`sudo apt install python3-venv`).
 
@@ -44,26 +48,38 @@ export LLM_CLI_API_KEY="your-api-key"                # optional for local instan
 export LLM_CLI_MODEL="gpt-4o"                        # optional, or use -m
 
 llm-cli-py -m gpt-4o "What is the capital of France?"   # one-shot prompt
-llm-cli-py -m gpt-4o -s README.md "Summarize this file" # with file/URL input
+llm-cli-py -m gpt-4o -s "Summarize this:" -s "$(cat README.md)"
 llm-cli-py -m gpt-4o                                   # interactive
-llm-cli-py models                                      # list models
 ```
 
-Sources given with `-s/--source` are classified automatically: an existing path
-is read as a file, an `http(s)://` URL is fetched, and anything else is passed
-through as literal text. Trailing bare words are treated as additional prompt
-text, so `llm-cli-py -m gpt-4o "…"` and `llm-cli-py -m gpt-4o -s "…"` are
-equivalent. `models` may be given as the first argument; it is recognised before
-any prompt text.
+### How the prompt is assembled
 
-### Slash Commands (Interactive Mode)
+`-s/--source` is a **pure text channel**: the value is sent to the model
+verbatim -- no file is read, no URL is fetched. `-s` values each go on their own
+line, then the trailing positional words on a final line, so
 
-| Command | Description |
-|---|---|
-| `/help`, `/h` | Show help |
-| `/info`, `/i` | Show session info |
-| `/dump` | Dump conversation as TOML |
-| `/quit`, `/q`, `/exit` | Exit session |
+```bash
+llm-cli-py -s "Context:" -s "$(cat notes.md)" "Summarize this"
+```
+
+sends `Context:
+<notes>
+Summarize this`. Read any file yourself with a shell
+substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
+`execute_python`.
+
+There are no slash commands, no prompt history and no stdin piping: every line
+you type at the `> ` prompt is sent to the model as a new turn, and Ctrl+D ends
+the session. A line starting with `/` is ordinary prompt text, so nothing needs
+escaping.
+
+With a prompt on the command line the CLI answers it first and then keeps
+prompting; assistant answers and tool output go to stdout, so output can be
+redirected while you type:
+
+```bash
+llm-cli-py -m gpt-4o "Write a haiku about JSON" > haiku.txt
+```
 
 ## Environment Variables
 
@@ -73,12 +89,8 @@ any prompt text.
 | `LLM_CLI_API_KEY` | API key (optional for local instances). Overridden by `--api-key`. |
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
 | `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
-| `LLM_CLI_PROMPT_HISTORY_FILE` | File to persist prompt input history across runs (e.g. `~/.llm_cli_prompt_history`). |
-| `LLM_CLI_CHAT_LOG_FILE` | File to write the conversation to (same content as `/dump`, flushed after every message). |
-| `LLM_CLI_CHAT_LOG_APPEND` | `1`/`true`/`yes`/`on` to append new messages instead of rewriting the file. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
 | `LOG_LEVEL` | Root logger level (e.g. `DEBUG`, `INFO`). |
-| `DEBUG_HTTP` | `1`/`true` for raw HTTP request/response debugging. |
 
 ### Example: Web Search Without a Search Tool
 
@@ -94,13 +106,13 @@ When you need web search, call the API below from execute_python:
 The key is available in the environment variable WEB_SEARCH_API_KEY.'
 ```
 
-Prefer referencing the key by env var name (as above) — the prompt appears in
-`/dump` and the chat log.
+Prefer referencing the key by env var name (as above), not by value.
 
 ## Tools
 
 `execute_python` is the only tool, by design: it runs Python code in a
-subprocess and returns the exit code plus stdout/stderr. Tool calls are always
+subprocess and returns the exit code plus stdout/stderr. Its output is sent back
+to the model, so the agent can read files, call APIs and run commands itself. Tool calls are always
 executed automatically (no approval prompt). The child runs with the same
 environment and file-system access as the CLI itself, and runs without a
 timeout: interrupt it with Ctrl+C, which kills the code and everything it
@@ -123,10 +135,9 @@ make clean         # remove caches and build artifacts (keeps .venv)
 make clean-all     # clean, and remove .venv too
 ```
 
-Dependencies live in `pyproject.toml` (runtime under `[project] dependencies`,
-dev tools under the `dev` extra). There is no lock file: edit the lists and run
-`python -m pip install -e ".[dev]"`. For reproducible installs, pin exact
-versions with `==`.
+`pyproject.toml` keeps `dependencies = []` on purpose: the package runs on the
+standard library alone. Dev tools live under the `dev` extra; there is no lock
+file, so pin exact versions with `==` if you need reproducible installs.
 
 ## License
 

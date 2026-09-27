@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 
-from .models import ClientState, DataSource, LlmResponse, Message, Role, ToolSchema
-from .utils.timeutil import now_iso
+from .models import ClientState, LlmResponse, Message, Role, ToolSchema
 
 
 class LlmClient(ABC):
@@ -23,16 +21,10 @@ class LlmClient(ABC):
         make later turns inconsistent with earlier context. When empty, no
         system message is seeded (no default/date prompt is injected).
         """
-        # Timestamps are local metadata (chat log / dump only); they are never
-        # sent to the API -- see LlmApiClient._build_messages.
         self._state = ClientState(
             model=model,
             system_prompt=system_prompt,
-            conversation=(
-                [Message(role=Role.SYSTEM, content=system_prompt, timestamp=now_iso())]
-                if system_prompt
-                else []
-            ),
+            conversation=([Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else []),
         )
 
     @property
@@ -42,16 +34,14 @@ class LlmClient(ABC):
     @abstractmethod
     def send(
         self,
-        data: list[DataSource],
+        prompt: str,
         tool_schemas: list[ToolSchema],
-        on_text: Callable[[str], None] | None = None,
     ) -> LlmResponse:
-        """Send a chat completion request (streaming).
+        """Send one chat completion request and return the whole response.
 
         Args:
-            data: User input sources for this turn.
+            prompt: The user's prompt text for this turn, sent verbatim.
             tool_schemas: Tool schemas to advertise.
-            on_text: Optional callback invoked with each text delta.
         """
         ...
 

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 
 class Role(StrEnum):
@@ -48,25 +46,6 @@ class Message:
     tool_call_id: str | None = None
     tool_calls: list[ToolCallPayload] | None = None
     """Tool calls data (for assistant messages)."""
-    timestamp: str | None = None
-    """Local creation time as an ISO 8601 string (e.g. ``2026-09-16T12:34:56+09:00``).
-
-    Local metadata only: it is written to ``/dump`` and the chat log, but is
-    deliberately NOT part of the API request (see
-    :meth:`LlmApiClient._build_messages`).
-    """
-
-
-SourceType = Literal["text", "file", "url"]
-"""Kind of input a :class:`DataSource` holds."""
-
-
-@dataclass
-class DataSource:
-    """Represents a data input (text, file content, URL result)."""
-
-    text: str
-    source_type: SourceType = "text"
 
 
 @dataclass
@@ -85,12 +64,7 @@ class ToolCall:
     name: str
     arguments: dict[str, object]
     parse_error: str | None = None
-    """Raw (unparseable) arguments string when the streamed JSON was truncated.
-
-    Set by the provider when the buffered ``arguments`` fragments never formed
-    valid JSON; such a call must not be executed (see
-    :meth:`ActiveSession.process_and_print`).
-    """
+    """Raw (unparseable) arguments string when the tool call's JSON was broken."""
 
 
 @dataclass
@@ -110,27 +84,3 @@ class ClientState:
     system_prompt: str = ""
     """System prompt read once at client initialization (startup snapshot)."""
     conversation: list[Message] = field(default_factory=list)
-    on_change: Callable[[], None] | None = None
-    """Optional listener called by :meth:`notify_changed` after the conversation grows.
-
-    Used to persist the chat log incrementally: the CLI registers a writer here,
-    so every new message (user turn, assistant answer, tool result) reaches disk
-    immediately instead of only when the session ends.
-    """
-
-    def notify_changed(self) -> None:
-        """Notify the change listener (if any) that the conversation grew.
-
-        Called right after appending a message, before any network request, so
-        the log on disk is up to date even if the process dies mid-request. It
-        is also called after an in-place repair (broken tool calls dropped), so
-        the persisted log matches the in-memory history.
-
-        The listener is best-effort by design: exceptions are swallowed here so
-        that a failing log write can never break the chat request.
-        """
-        if self.on_change is None:
-            return
-        # Logging must never break a request, so failures are swallowed.
-        with contextlib.suppress(Exception):
-            self.on_change()

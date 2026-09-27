@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import http.client
 import logging
 import os
 import sys
@@ -21,7 +20,6 @@ from .consts import (
     DEFAULT_REQUEST_TIMEOUT,
     ENV_API_KEY,
     ENV_API_URL,
-    ENV_DEBUG_HTTP,
     ENV_LOG_LEVEL,
     ENV_MODEL,
     ENV_SYSTEM_PROMPT,
@@ -29,12 +27,9 @@ from .consts import (
 from .providers.llm_api import LlmApiClient
 from .session.interactive import run_interactive
 from .session.session import ActiveSession, SessionContext
-from .sources import resolve_sources
+from .sources import build_prompt
 from .tools import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, ToolRegistry, execute_python
 from .ui import display as ui_display
-
-SUBCOMMANDS: tuple[str, ...] = ("models",)
-"""Names of the non-chat subcommands (dispatched before any client is built)."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,16 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="sources",
         default=[],
-        help="Input sources (text, file paths, URLs). Can be specified multiple times.",
+        help="Prompt text, passed to the model verbatim. Can be repeated.",
     )
     parser.add_argument(
         "prompt",
         nargs="*",
         metavar="PROMPT",
-        help=(
-            "Prompt text (equivalent to a trailing -s argument). "
-            f"Recognised subcommands: {', '.join(SUBCOMMANDS)}."
-        ),
+        help="Prompt text (equivalent to a trailing -s argument).",
     )
     parser.add_argument(
         "-m",
@@ -82,32 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"API key. Overrides {ENV_API_KEY} env var.",
     )
     return parser
-
-
-def dispatch_subcommand(tokens: list[str], api_url: str, api_key: str) -> list[str] | None:
-    """Run the subcommand named by the first token, if any.
-
-    Subcommands are dispatched by hand rather than with ``add_subparsers``: a
-    free-form trailing prompt (e.g. ``llm-cli-py -m gpt-4o "What is 2+2?"``)
-    is otherwise misread as a subcommand name by argparse.
-
-    Returns:
-        The remaining prompt tokens when no subcommand was given, otherwise
-        ``None`` -- the subcommand has run and the caller should stop.
-    """
-    if not tokens or tokens[0] not in SUBCOMMANDS:
-        return tokens
-
-    command, rest = tokens[0], tokens[1:]
-    if rest:
-        ui_display.report_error(f"'{command}' takes no arguments (got: {' '.join(rest)}).")
-        sys.exit(2)
-
-    if command == "models":
-        from .commands.models import run_models
-
-        run_models(api_url, api_key)
-    return None
 
 
 def initialize_tools() -> ToolRegistry:
@@ -129,22 +95,13 @@ def initialize_tools() -> ToolRegistry:
 
 
 def _configure_logging() -> None:
-    """Apply the ``LOG_LEVEL`` / ``DEBUG_HTTP`` environment switches."""
+    """Apply the ``LOG_LEVEL`` environment switch."""
     log_level_str = os.environ.get(ENV_LOG_LEVEL, "").upper()
     if log_level_str:
         numeric_level = getattr(logging, log_level_str, None)
         if numeric_level is not None:
             logging.basicConfig()
             logging.getLogger().setLevel(numeric_level)
-
-    # DEBUG_HTTP env var specifically enables raw HTTP request/response debugging
-    # (sets http.client debuglevel and urllib3 logger to DEBUG)
-    if os.environ.get(ENV_DEBUG_HTTP, "").lower() in ("1", "true"):
-        if not log_level_str:
-            logging.basicConfig()
-        http.client.HTTPConnection.debuglevel = 1
-        logging.getLogger("urllib3").setLevel(logging.DEBUG)
-        logging.getLogger("urllib3").propagate = True
 
 
 def _configure_streams() -> None:
@@ -188,45 +145,31 @@ def main() -> None:
     # Priority: 1) --api-key, 2) LLM_CLI_API_KEY env
     api_key = (args.api_key or os.environ.get(ENV_API_KEY, "")).strip()
 
-    # ── Handle subcommands ─────────────────────────────────────────
-    prompt_tokens = dispatch_subcommand(args.prompt, api_url, api_key)
-    if prompt_tokens is None:
-        return
-
-    # ── Resolve model and system prompt ────────────────────────────
-    # Priority: 1) -m/--model, 2) LLM_CLI_MODEL env
+    # ── Resolve model, system prompt and prompt text ───────────────
+    # Priority for the model: 1) -m/--model, 2) LLM_CLI_MODEL env
     model = args.model or os.environ.get(ENV_MODEL, "")
     # Read once here (startup snapshot) and pass down; see LlmClient.__init__.
     system_prompt = os.environ.get(ENV_SYSTEM_PROMPT, "")
+    # -s values and trailing words are all prompt text, sent verbatim.
+    prompt = build_prompt(args.sources, args.prompt)
 
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
     # ── Initialize LLM client and run session ────────────────────────
     # Built-in request timeout is used (no CLI flag / env override).
-    with LlmApiClient(
+    client = LlmApiClient(
         model=model,
         api_url=api_url,
         api_key=api_key,
         timeout=DEFAULT_REQUEST_TIMEOUT,
         system_prompt=system_prompt,
-    ) as client:
-        ctx = SessionContext(
-            tool_registry=tool_registry,
-        )
-        session = ActiveSession(client, ctx)
-
-        # Positional prompt text is treated as trailing -s values, so
-        # `llm-cli-py -m gpt-4o "question"` and `... -s "question"` are equivalent.
-        initial_sources = resolve_sources(
-            [*args.sources, *prompt_tokens],
-            warn=ui_display.report_warning,
-        )
-
-        run_interactive(
-            session,
-            initial_sources if initial_sources else None,
-        )
+    )
+    ctx = SessionContext(
+        tool_registry=tool_registry,
+    )
+    session = ActiveSession(client, ctx)
+    run_interactive(session, prompt)
 
 
 if __name__ == "__main__":

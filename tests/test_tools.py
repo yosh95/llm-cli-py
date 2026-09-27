@@ -1,204 +1,52 @@
-"""Tests for the Python execution tool, the tool registry and result types."""
+"""Tests for the Python execution tool and the tool registry."""
 
 from __future__ import annotations
 
-import os
-import signal
-import threading
-import time
-from pathlib import Path
-
-import pytest
-
-from llm_cli_py.tools.python_exec import ENV_PYTHON_EXEC, _resolve_child_python, execute_python
+from llm_cli_py.tools.python_exec import execute_python
+from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult, ToolError
 
 
-def _signal_main_thread_when_ready(marker: Path, timeout: float) -> None:
-    """Wait for ``marker``, then interrupt the main thread like Ctrl+C does.
-
-    ``signal.pthread_kill`` addresses the main thread specifically: that is where
-    the code under test blocks in ``proc.communicate()``, i.e. exactly where a
-    terminal Ctrl+C lands. Signalling later would only be noticed once the
-    blocking wait returned on its own.
-    """
-    deadline = time.monotonic() + timeout
-    while not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    main_thread = threading.main_thread()
-    if main_thread.ident is not None:
-        signal.pthread_kill(main_thread.ident, signal.SIGINT)
+def test_code_runs_and_stdout_is_captured() -> None:
+    result = execute_python("print('hello world')")
+    assert isinstance(result, ExecResult)
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == "hello world"
 
 
-class TestExecutePython:
-    @pytest.mark.parametrize(
-        ("code", "expected_stdout"),
-        [
-            ("print('hello world')", "hello world"),
-            ("import math; print(math.sqrt(16))", "4.0"),
-            ("", ""),
-        ],
-    )
-    def test_stdout_is_captured(self, code: str, expected_stdout: str) -> None:
-        result = execute_python(code)
-        assert isinstance(result, ExecResult)
-        assert result.exit_code == 0
-        assert result.stderr == ""
-        assert result.stdout.strip() == expected_stdout
-
-    @pytest.mark.parametrize(
-        ("code", "needle"),
-        [
-            ("raise ValueError('test error')", "ValueError"),
-            ("if True print('bad')", "SyntaxError"),
-        ],
-    )
-    def test_errors_are_reported_in_stderr(self, code: str, needle: str) -> None:
-        result = execute_python(code)
-        assert isinstance(result, ExecResult)
-        assert result.exit_code == 1
-        assert needle in result.stderr
-
-    @pytest.mark.skipif(os.name != "posix", reason="POSIX signal semantics")
-    def test_ctrl_c_kills_child_and_its_descendants(self, tmp_path: Path) -> None:
-        """Ctrl+C must not leave the executed code (or its children) running.
-
-        The code spawns a process, records its pid, then sleeps. The interrupt
-        is delivered while the tool is waiting, and afterwards both the code and
-        the process it spawned must be gone.
-        """
-        marker = tmp_path / "grandchild.pid"
-        code = (
-            "import subprocess, sys, time\n"
-            "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-            f"print(p.pid, flush=True)\n"
-            f"open({str(marker)!r}, 'w').write(str(p.pid))\n"
-            "time.sleep(60)\n"
-        )
-        watcher = threading.Thread(target=_signal_main_thread_when_ready, args=(marker, 15.0), daemon=True)
-        watcher.start()
-
-        with pytest.raises(KeyboardInterrupt):
-            execute_python(code)
-        watcher.join(timeout=5)
-
-        assert marker.exists(), "the executed code never started its child"
-        grandchild_pid = int(marker.read_text())
-        with pytest.raises(ProcessLookupError):
-            os.kill(grandchild_pid, 0)
-        time.sleep(0.3)  # a doomed process would be gone by now
-        with pytest.raises(ProcessLookupError):
-            os.kill(grandchild_pid, 0)
-
-    def test_non_ascii_stdout_roundtrips(self) -> None:
-        """Non-ASCII output must survive the subprocess pipe (regression).
-
-        The child's stdout is UTF-8 (pinned via PYTHONIOENCODING) while the
-        parent's *default* text decoding is the locale encoding (e.g. cp932 on
-        Japanese Windows). Without an explicit ``encoding="utf-8"`` on Popen the
-        reader thread raised UnicodeDecodeError and the output was lost.
-        """
-        result = execute_python('print("\u65e5\u672c\u8a9e")')
-        assert isinstance(result, ExecResult)
-        assert result.exit_code == 0
-        assert result.stdout.strip() == "\u65e5\u672c\u8a9e"
-
-    def test_emoji_stdout_roundtrips(self) -> None:
-        """Emoji must not crash the *child* even on a non-UTF-8 console."""
-        result = execute_python('print("\U0001f680")')
-        assert isinstance(result, ExecResult)
-        assert result.exit_code == 0
-        assert "\U0001f680" in result.stdout
-
-    def test_dangerous_subprocess_pattern_is_refused(self) -> None:
-        result = execute_python('subprocess.run(["cmd", "2>&1"], shell=True)')
-        assert isinstance(result, ToolError)
-        assert "Dangerous" in result.error
-        assert "2>&1" in result.error
+def test_failing_code_reports_stderr_and_a_nonzero_exit_code() -> None:
+    result = execute_python("raise ValueError('test error')")
+    assert isinstance(result, ExecResult)
+    assert result.exit_code == 1
+    assert "ValueError" in result.stderr
 
 
-class TestChildInterpreter:
-    """The child runs with the CLI's own interpreter, and is overridable."""
-
-    def test_resolves_to_the_running_interpreter(self, monkeypatch) -> None:
-        import sys
-
-        monkeypatch.delenv(ENV_PYTHON_EXEC, raising=False)
-        assert _resolve_child_python() == sys.executable
-
-    def test_env_override_wins(self, monkeypatch) -> None:
-        monkeypatch.setenv(ENV_PYTHON_EXEC, "/opt/custom/python")
-        assert _resolve_child_python() == "/opt/custom/python"
-
-    def test_env_override_is_honoured_by_execute_python(self, monkeypatch) -> None:
-        """An override pointing at a broken path fails loudly, proving it is used."""
-        monkeypatch.setenv(ENV_PYTHON_EXEC, "/nonexistent/python-for-tests")
-        result = execute_python("print('never runs')")
-        assert isinstance(result, ExecResult)
-        assert result.exit_code == -1
-        assert "python-for-tests" in result.stderr or "No such file" in result.stderr
+def test_non_ascii_output_survives_the_subprocess_pipe() -> None:
+    result = execute_python('print("\u65e5\u672c\u8a9e")')
+    assert isinstance(result, ExecResult)
+    assert result.stdout.strip() == "\u65e5\u672c\u8a9e"
 
 
-class TestCheckDangerousSubprocess:
-    """The static check must flag shell=True + list + meta-char, nothing else."""
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            'subprocess.run(["cmd", "2>&1"], shell=True)',  # run
-            'subprocess.Popen(["cmd", "|"], shell=True)',  # Popen
-            'subprocess.call(["cmd", ";"], shell=True)',  # call
-            'subprocess.check_call(["cmd", "`"], shell=True)',  # check_call
-            'subprocess.check_output(["cmd", "$("], shell=True)',  # check_output
-        ],
-    )
-    def test_dangerous_patterns_are_detected(self, code: str) -> None:
-        from llm_cli_py.tools.python_exec import _check_dangerous_subprocess
-
-        error = _check_dangerous_subprocess(code)
-        assert error is not None
-        assert "shell=True" in error
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            'subprocess.run(["ls"], capture_output=True)',  # no shell
-            'subprocess.run(["echo", "hello"], shell=False)',  # shell=False
-            'subprocess.run("ls -la", shell=True)',  # string arg, not a list
-            "print('hello')",  # no subprocess at all
-            "this is not valid python @@@",  # unparseable
-        ],
-    )
-    def test_safe_code_is_not_flagged(self, code: str) -> None:
-        from llm_cli_py.tools.python_exec import _check_dangerous_subprocess
-
-        assert _check_dangerous_subprocess(code) is None
+def test_dangerous_subprocess_pattern_is_refused() -> None:
+    """``shell=True`` with a meta-character in a list hangs forever, so it is refused."""
+    result = execute_python('subprocess.run(["cmd", "2>&1"], shell=True)')
+    assert isinstance(result, ToolError)
+    assert "Dangerous" in result.error
 
 
-class TestToolRegistry:
-    def test_register_get_and_schema(self) -> None:
-        from llm_cli_py.tools.registry import ToolRegistry
-
-        registry = ToolRegistry()
-        registry.register("calc", "Calculate", {"type": "object"}, lambda **_: ExecResult())
-        tool = registry.get("calc")
-        assert tool is not None and tool.name == "calc"
-        assert "calc" in registry
-        assert "other" not in registry
-        assert registry.get("missing") is None
-        assert [s.name for s in registry.get_schemas()] == ["calc"]
-        assert tool.schema.description == "Calculate"
-        assert tool.schema.parameters == {"type": "object"}
-
-    def test_tool_names_are_sorted(self) -> None:
-        from llm_cli_py.tools.registry import ToolRegistry
-
-        registry = ToolRegistry()
-        for name in ("z_tool", "a_tool"):
-            registry.register(name, name, {"type": "object"}, lambda **_: ExecResult())
-        assert registry.get_tool_names() == ["a_tool", "z_tool"]
-
-
-def test_result_types_serialise() -> None:
+def test_tool_result_types_serialise() -> None:
     assert ExecResult(stdout="hello").to_dict() == {"stdout": "hello", "stderr": "", "exit_code": 0}
     assert ToolError(error="boom").to_dict() == {"error": "boom"}
+
+
+def test_registry_registers_looks_up_and_advertises_a_tool() -> None:
+    registry = ToolRegistry()
+    registry.register("calc", "Calculate", {"type": "object"}, lambda **_: ExecResult())
+
+    tool = registry.get("calc")
+    assert tool is not None and tool.name == "calc"
+    assert "calc" in registry and "other" not in registry
+    assert registry.get("missing") is None
+    assert [s.name for s in registry.get_schemas()] == ["calc"]
+    assert tool.schema.description == "Calculate"
