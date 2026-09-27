@@ -6,13 +6,14 @@ one place, and the session itself (``ActiveSession``) owns everything about
 talking to the model.
 
 Input is read from the terminal using prompt_toolkit; there is no other way in
-(no stdin piping, no slash commands). A stray Ctrl+C at the prompt
-returns to it, with the half-typed line abandoned; end of input ends the
-session -- Ctrl+D on Linux/macOS and Ctrl+Z then Enter on Windows, where the
-terminal reports end-of-file instead. Neither key makes the terminal emit the
-newline that Enter would, so ``read_prompt`` prints one on the way out: that
-keeps the next output -- a rule, or the shell prompt after the CLI exits -- from
-being appended to ``> ^C``.
+(no stdin piping, no slash commands). A stray Ctrl+C at the prompt returns to
+it, with the half-typed line abandoned; end of input ends the session -- Ctrl+D
+on Linux/macOS and Ctrl+Z then Enter on Windows, where the terminal reports
+end-of-file instead. Closing the line those keys leave behind is prompt_toolkit's
+job: when a prompt aborts it moves the cursor below ``> `` and terminates that
+line itself, so the next output -- the rule of the following turn, or the shell
+prompt once the CLI exits -- already starts on a line of its own. Nothing is
+printed here to add to it.
 """
 
 from __future__ import annotations
@@ -28,24 +29,18 @@ PROMPT_TEXT = "> "
 def read_prompt(prompt_session: PromptSession[str] | None = None) -> str:
     """Read one line of prompt text from the terminal using prompt_toolkit.
 
-    A line is opened here (the ``> `` prompt), so it is closed here too: Ctrl+C
-    and Ctrl+D / Ctrl+Z end prompt input without the newline Enter would send,
-    leaving the cursor after the prompt text. Printing that newline before
-    propagating keeps the next thing written -- the rule of the following turn,
-    or the shell prompt once the CLI exits -- from starting on the ``> ^C``
-    line. The half-typed line itself is abandoned, not resumed.
+    The half-typed line is abandoned, not resumed: Ctrl+C and Ctrl+D / Ctrl+Z
+    propagate to the caller, which decides what an interrupt (back to the
+    prompt) and end of input (end the session) mean.
 
-    The exceptions are deliberately not swallowed: the session loop is the one
-    place that decides what an interrupt or end of input means (return to the
-    prompt, and end the session, respectively).
+    Aborting the prompt is also what closes its line -- prompt_toolkit moves the
+    cursor past ``> `` and emits the newline Enter would have -- so nothing is
+    printed here. A newline of our own would be a second one, leaving a blank
+    line between the abandoned prompt and the next output.
     """
-    try:
-        if prompt_session is not None:
-            return prompt_session.prompt(PROMPT_TEXT)
-        return prompt(PROMPT_TEXT)
-    except (KeyboardInterrupt, EOFError):
-        ui.display.close_prompt_line()
-        raise
+    if prompt_session is not None:
+        return prompt_session.prompt(PROMPT_TEXT)
+    return prompt(PROMPT_TEXT)
 
 
 def handle_user_input(session: ActiveSession, text: str) -> None:
@@ -86,10 +81,11 @@ def run_interactive(
             handle_user_input(session, user_input)
 
         except KeyboardInterrupt:
-            # A stray Ctrl+C returns to the prompt, which read_prompt already
-            # left on a line of its own (Ctrl+C while a request or a tool is
-            # running is handled by that operation). End of input ends the
-            # session instead: Ctrl+D, or Ctrl+Z then Enter on Windows.
+            # A stray Ctrl+C returns to the prompt: prompt_toolkit closed the
+            # abandoned line as it aborted, so nothing has to be written here
+            # (Ctrl+C while a request or a tool is running is handled by that
+            # operation). End of input ends the session instead: Ctrl+D, or
+            # Ctrl+Z then Enter on Windows.
             continue
         except EOFError:
             break

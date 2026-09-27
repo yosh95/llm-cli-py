@@ -122,8 +122,8 @@ def test_ctrl_c_at_the_prompt_keeps_the_session_alive(monkeypatch) -> None:
     handle.assert_called_once()  # the interrupt only returned to the prompt
 
 
-def test_read_prompt_ends_the_line_after_ctrl_c(capsys) -> None:
-    """Ctrl+C does not send the newline Enter would: ``read_prompt`` prints it."""
+def test_read_prompt_adds_no_newline_after_ctrl_c(capsys) -> None:
+    """prompt_toolkit closes the line as it aborts: a newline here would double it."""
     from llm_cli_py.session import interactive as interactive_mod
 
     with (
@@ -132,17 +132,17 @@ def test_read_prompt_ends_the_line_after_ctrl_c(capsys) -> None:
     ):
         interactive_mod.read_prompt()
 
-    assert capsys.readouterr().out == "\n"
+    assert capsys.readouterr().out == ""
 
 
-def test_read_prompt_ends_the_line_at_end_of_input(capsys) -> None:
-    """Ctrl+D leaves the cursor on the ``> `` line too; the shell prompt follows it."""
+def test_read_prompt_adds_no_newline_at_end_of_input(capsys) -> None:
+    """Ctrl+D is closed the same way, so the shell prompt follows with no blank line."""
     from llm_cli_py.session import interactive as interactive_mod
 
     with patch("llm_cli_py.session.interactive.prompt", side_effect=EOFError), pytest.raises(EOFError):
         interactive_mod.read_prompt()
 
-    assert capsys.readouterr().out == "\n"
+    assert capsys.readouterr().out == ""
 
 
 def test_read_prompt_adds_nothing_after_enter(capsys) -> None:

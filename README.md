@@ -73,10 +73,10 @@ End the session with end-of-input -- **Ctrl+D** on Linux/macOS, **Ctrl+Z then
 Enter** on Windows (that is where the terminal reports end-of-file; Windows has
 no Ctrl+D). A stray **Ctrl+C** at the prompt abandons the line being typed and
 returns to a fresh prompt; `Ctrl+C` while a request or a tool is running
-interrupts that operation instead. Neither key transmits what Enter would, so
-the CLI prints the missing newline itself: whatever is written after a stray
-Ctrl+C, and your shell prompt after Ctrl+D, start on a line of their own
-instead of being appended to `> `.
+interrupts that operation instead. Aborting the prompt already ends the line
+`> ` opened, so the next output -- the rule of the following turn, or your shell
+prompt after Ctrl+D -- follows the abandoned prompt directly, with no blank line
+in between.
 
 With a prompt on the command line the CLI answers it first and then keeps
 prompting; assistant answers and tool output go to stdout, so output can be
