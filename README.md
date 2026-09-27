@@ -3,7 +3,7 @@
 **Unified OpenAI-Compatible CLI for AI Agents (Python Edition)**
 
 A small command-line client for any OpenAI-compatible LLM API, with a built-in
-Python-execution tool. **Standard library only** -- no runtime dependencies.
+Python-execution tool.
 
 ## Features
 
@@ -14,9 +14,9 @@ Python-execution tool. **Standard library only** -- no runtime dependencies.
 - **No provider lock-in** — capabilities are described in `LLM_CLI_SYSTEM_PROMPT`,
   so the agent calls APIs itself via `execute_python`; switch providers by
   editing an env var
-- **Interactive session** — a plain `> ` prompt (`input()`), one turn per line
+- **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn per line
 - **One-shot mode** — pass a prompt and the process answers once and exits
-- **Zero dependencies** — `urllib.request`, `input()`, `subprocess`; nothing to install
+- **Minimal dependencies** — `requests`, `prompt_toolkit`
 
 ## Install
 
@@ -33,9 +33,6 @@ make install        # installs into .venv
 make install-dev    # .venv + dev tools (pytest, ruff, mypy)
 pipx install -e .   # global, independent of .venv
 ```
-
-The runtime needs nothing else: no `requests`, no `prompt_toolkit`, no TOML
-writer. Only the dev extra (pytest, ruff, mypy) installs anything.
 
 On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
 (`sudo apt install python3-venv`).

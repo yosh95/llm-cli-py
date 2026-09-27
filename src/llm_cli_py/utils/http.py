@@ -1,19 +1,18 @@
 """Minimal HTTP POST helper for the OpenAI-compatible chat endpoint.
 
-Standard library only: the CLI makes exactly one kind of request (a JSON
-``POST`` to ``/chat/completions``), so a full HTTP client library is not
-needed. This module keeps the two behaviours that matter for that single
-request: retrying transient failures, and surfacing the provider's error body
-instead of a bare status line.
+This module provides a helper for making JSON POST requests to
+``/chat/completions`` using ``requests``. It keeps the two behaviours that
+matter for that single request: retrying transient failures, and surfacing the
+provider's error body instead of a bare status line.
 """
 
 from __future__ import annotations
 
 import json
 import time
-import urllib.error
-import urllib.request
 from typing import Any
+
+import requests
 
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 """HTTP statuses treated as transient (retried with exponential backoff)."""
@@ -104,36 +103,36 @@ def post_json(
     Raises:
         HttpError: On a non-retryable error, or after the retries are exhausted.
     """
-    data = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method="POST",
-    )
 
     last_error: HttpError | None = None
     for attempt in range(max_retries):
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as resp:
-                payload: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
-                return payload
-        except urllib.error.HTTPError as e:
-            raw = e.read().decode("utf-8", errors="replace")
-            error = _http_error(e.code, e.reason or "", raw)
-            if e.code not in RETRYABLE_STATUS:
-                raise error from e
-            last_error = error
-        except (urllib.error.URLError, TimeoutError) as e:
-            # Connection refused/DNS failure (URLError) and read timeouts
-            # (TimeoutError) are both worth another attempt.
+            resp = requests.post(
+                url,
+                json=json_body,
+                headers=headers,
+                timeout=timeout,
+            )
+            if resp.status_code >= 400:
+                error = _http_error(resp.status_code, resp.reason or "", resp.text)
+                if resp.status_code not in RETRYABLE_STATUS:
+                    raise error
+                last_error = error
+            else:
+                try:
+                    payload: dict[str, Any] = resp.json()
+                except ValueError as e:
+                    msg = f"Invalid JSON response from {url}: {e}"
+                    raise HttpError(msg) from e
+                else:
+                    return payload
+        except (requests.ConnectionError, requests.Timeout) as e:
+            # Connection refused/DNS failure and read timeouts
+            # are both worth another attempt.
             last_error = HttpError(f"Request failed: {e}")
-        except json.JSONDecodeError as e:
-            msg = f"Invalid JSON response from {url}: {e}"
-            raise HttpError(msg) from e
 
         if attempt < max_retries - 1:
             time.sleep(2**attempt)

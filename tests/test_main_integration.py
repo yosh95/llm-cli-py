@@ -126,7 +126,10 @@ def test_read_prompt_ends_the_line_after_ctrl_c(capsys) -> None:
     """Ctrl+C does not send the newline Enter would: ``read_prompt`` prints it."""
     from llm_cli_py.session import interactive as interactive_mod
 
-    with patch("builtins.input", side_effect=KeyboardInterrupt), pytest.raises(KeyboardInterrupt):
+    with (
+        patch("llm_cli_py.session.interactive.prompt", side_effect=KeyboardInterrupt),
+        pytest.raises(KeyboardInterrupt),
+    ):
         interactive_mod.read_prompt()
 
     assert capsys.readouterr().out == "\n"
@@ -136,7 +139,7 @@ def test_read_prompt_ends_the_line_at_end_of_input(capsys) -> None:
     """Ctrl+D leaves the cursor on the ``> `` line too; the shell prompt follows it."""
     from llm_cli_py.session import interactive as interactive_mod
 
-    with patch("builtins.input", side_effect=EOFError), pytest.raises(EOFError):
+    with patch("llm_cli_py.session.interactive.prompt", side_effect=EOFError), pytest.raises(EOFError):
         interactive_mod.read_prompt()
 
     assert capsys.readouterr().out == "\n"
@@ -146,7 +149,19 @@ def test_read_prompt_adds_nothing_after_enter(capsys) -> None:
     """A line finished with Enter is already terminated: no second newline."""
     from llm_cli_py.session import interactive as interactive_mod
 
-    with patch("builtins.input", return_value="hello"):
+    with patch("llm_cli_py.session.interactive.prompt", return_value="hello"):
         assert interactive_mod.read_prompt() == "hello"
 
     assert capsys.readouterr().out == ""
+
+
+def test_read_prompt_with_prompt_session() -> None:
+    """When a PromptSession is provided, its prompt method is used."""
+    from unittest.mock import MagicMock
+
+    from llm_cli_py.session import interactive as interactive_mod
+
+    mock_session = MagicMock()
+    mock_session.prompt.return_value = "hello from session"
+    assert interactive_mod.read_prompt(mock_session) == "hello from session"
+    mock_session.prompt.assert_called_once_with("> ")

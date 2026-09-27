@@ -22,7 +22,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-dependencies = []
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+    "requests>=2.31.0",
+]
 
 [project.optional-dependencies]
 dev = [

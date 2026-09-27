@@ -1,12 +1,12 @@
-"""Interactive chat loop over a plain ``input()`` prompt.
+"""Interactive chat loop using prompt_toolkit.
 
 The loop is deliberately thin: read a line, hand it to the session, repeat. All
 user-visible output goes through ``ui.display`` so the transcript style lives in
 one place, and the session itself (``ActiveSession``) owns everything about
 talking to the model.
 
-Input is read from the terminal with ``input()``; there is no other way in (no
-stdin piping, no history file, no slash commands). A stray Ctrl+C at the prompt
+Input is read from the terminal using prompt_toolkit; there is no other way in
+(no stdin piping, no slash commands). A stray Ctrl+C at the prompt
 returns to it, with the half-typed line abandoned; end of input ends the
 session -- Ctrl+D on Linux/macOS and Ctrl+Z then Enter on Windows, where the
 terminal reports end-of-file instead. Neither key makes the terminal emit the
@@ -17,17 +17,19 @@ being appended to ``> ^C``.
 
 from __future__ import annotations
 
+from prompt_toolkit import PromptSession, prompt
+
 from .. import ui
 from .session import ActiveSession
 
 PROMPT_TEXT = "> "
 
 
-def read_prompt() -> str:
-    """Read one line of prompt text from the terminal.
+def read_prompt(prompt_session: PromptSession[str] | None = None) -> str:
+    """Read one line of prompt text from the terminal using prompt_toolkit.
 
     A line is opened here (the ``> `` prompt), so it is closed here too: Ctrl+C
-    and Ctrl+D / Ctrl+Z end ``input()`` without the newline Enter would send,
+    and Ctrl+D / Ctrl+Z end prompt input without the newline Enter would send,
     leaving the cursor after the prompt text. Printing that newline before
     propagating keeps the next thing written -- the rule of the following turn,
     or the shell prompt once the CLI exits -- from starting on the ``> ^C``
@@ -38,7 +40,9 @@ def read_prompt() -> str:
     prompt, and end the session, respectively).
     """
     try:
-        return input(PROMPT_TEXT)
+        if prompt_session is not None:
+            return prompt_session.prompt(PROMPT_TEXT)
+        return prompt(PROMPT_TEXT)
     except (KeyboardInterrupt, EOFError):
         ui.display.close_prompt_line()
         raise
@@ -55,6 +59,7 @@ def handle_user_input(session: ActiveSession, text: str) -> None:
 def run_interactive(
     session: ActiveSession,
     initial_prompt: str = "",
+    prompt_session: PromptSession[str] | None = None,
 ) -> None:
     """Run the chat session loop.
 
@@ -62,14 +67,18 @@ def run_interactive(
         session: The active session to drive.
         initial_prompt: Optional prompt (from the command line) processed as the
             first turn, before the terminal prompt is shown.
+        prompt_session: Optional prompt_toolkit PromptSession to read input with.
     """
     if initial_prompt:
         session.process_and_print(initial_prompt)
 
+    if prompt_session is None:
+        prompt_session = PromptSession()
+
     while True:
         try:
             ui.display.print_rule()
-            user_input = read_prompt()
+            user_input = read_prompt(prompt_session)
 
             if not user_input.strip():
                 continue

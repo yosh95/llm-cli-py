@@ -24,7 +24,7 @@ def print_rule() -> None:
 def close_prompt_line() -> None:
     """End the line the user was typing on with a newline.
 
-    ``input()`` echoes what was typed, but only Enter makes the terminal emit
+    The prompt echoes what was typed, but only Enter makes the terminal emit
     the newline: Ctrl+C (interrupt) and Ctrl+D / Ctrl+Z (end of input) leave the
     cursor sitting after the prompt, so the caller prints the newline itself.
     Everything printed afterwards then starts on a line of its own instead of
