@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
+import os
+import runpy
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import llm_cli_py
 from llm_cli_py.main import build_parser, initialize_tools
+from llm_cli_py.main import main as main_module_main
+
+VERSION_OUTPUT = "llm-cli-py 0.2.0"
+
+
+def _run_as_module(*argv: str) -> subprocess.CompletedProcess[str]:
+    """Run ``python -m llm_cli_py`` in a child process, with a clean env."""
+    src_dir = Path(llm_cli_py.__file__).parent.parent
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LLM_CLI_")}
+    env["PYTHONPATH"] = str(src_dir)
+    return subprocess.run(
+        [sys.executable, "-m", "llm_cli_py", *argv],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
 
 
 def test_execute_python_is_the_only_registered_tool() -> None:
@@ -34,7 +57,28 @@ def test_version_flag(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args(["--version"])
     assert exc.value.code == 0
-    assert "llm-cli-py 0.2.0" in capsys.readouterr().out
+    assert VERSION_OUTPUT in capsys.readouterr().out
+
+
+def test_module_entry_point_is_importable_without_running() -> None:
+    """``python -m llm_cli_py`` discovers ``__main__``; importing it must be inert."""
+    module = runpy.run_module("llm_cli_py.__main__", run_name="not_main")
+    assert module["main"] is main_module_main  # the console script's own entry point
+
+
+def test_python_dash_m_runs_the_cli() -> None:
+    """The module entry point reports the same version as the console script."""
+    result = _run_as_module("--version")
+    assert result.returncode == 0
+    assert result.stdout.strip() == VERSION_OUTPUT
+
+
+def test_python_dash_m_needs_no_console_script() -> None:
+    """No launcher involved: the interpreter's own ``python`` is the only executable."""
+    result = _run_as_module("-m", "gpt-4o")
+    assert result.returncode == 1  # LLM_CLI_API_URL is not set in the child's env
+    assert "LLM_CLI_API_URL" in result.stdout
+    assert "Traceback" not in result.stderr
 
 
 def test_main_exits_without_api_url(capsys, monkeypatch) -> None:

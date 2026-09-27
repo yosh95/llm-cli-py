@@ -42,6 +42,22 @@ default).
 On Debian/Ubuntu, `python3 -m venv` needs the `python3-venv` package
 (`sudo apt install python3-venv`).
 
+### Two ways to start it
+
+The install provides **two interchangeable entry points** -- same code, same
+flags, same output:
+
+| Command | What runs |
+|---|---|
+| `llm-cli-py` | The console script from `[project.scripts]`. `pip` writes a launcher next to it: a text script on Linux/macOS, a small **unsigned `.exe`** in `Scripts\` on Windows. |
+| `python -m llm_cli_py` | The package's `__main__.py`, run by the interpreter you invoke. No launcher file is generated or executed. |
+
+Use whichever you like; both are supported and tested. On Windows the second
+one is worth knowing about: a freshly written unsigned `.exe` has no reputation
+yet, so SmartScreen / Smart App Control can hold `llm-cli-py` back, while
+`python -m llm_cli_py` starts from the already-trusted `python.exe` and is
+never gated that way.
+
 ## Usage
 
 ```bash
@@ -52,6 +68,8 @@ export LLM_CLI_MODEL="gpt-4o"                        # optional, or use -m
 llm-cli-py -m gpt-4o "What is the capital of France?"   # answer, then keep prompting
 llm-cli-py -m gpt-4o -s "Summarize this:" -s "$(cat README.md)"
 llm-cli-py -m gpt-4o                                   # interactive
+
+python -m llm_cli_py -m gpt-4o "What is the capital of France?"   # identical
 ```
 
 ### How the prompt is assembled
