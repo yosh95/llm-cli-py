@@ -88,3 +88,65 @@ def test_client_receives_the_resolved_configuration(monkeypatch) -> None:
         "timeout": 300,
         "system_prompt": "be helpful",
     }
+
+
+def test_end_of_input_ends_the_session(monkeypatch) -> None:
+    """Ctrl+D (or Ctrl+Z then Enter on Windows) reaches the loop as EOF."""
+    monkeypatch.setenv("LLM_CLI_API_URL", "https://api.example.com/v1")
+    monkeypatch.setattr("sys.argv", ["llm-cli-py"])
+    from llm_cli_py.session import interactive as interactive_mod
+
+    with (
+        patch("llm_cli_py.main.LlmApiClient"),
+        patch.object(interactive_mod, "read_prompt", side_effect=EOFError),
+    ):
+        from llm_cli_py import main as main_module
+
+        main_module.main()  # must return instead of looping forever
+
+
+def test_ctrl_c_at_the_prompt_keeps_the_session_alive(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_CLI_API_URL", "https://api.example.com/v1")
+    monkeypatch.setattr("sys.argv", ["llm-cli-py"])
+    from llm_cli_py.session import interactive as interactive_mod
+
+    with (
+        patch("llm_cli_py.main.LlmApiClient"),
+        patch.object(interactive_mod, "read_prompt", side_effect=[KeyboardInterrupt, "hello", EOFError]),
+        patch.object(interactive_mod, "handle_user_input") as handle,
+    ):
+        from llm_cli_py import main as main_module
+
+        main_module.main()
+
+    handle.assert_called_once()  # the interrupt only returned to the prompt
+
+
+def test_read_prompt_ends_the_line_after_ctrl_c(capsys) -> None:
+    """Ctrl+C does not send the newline Enter would: ``read_prompt`` prints it."""
+    from llm_cli_py.session import interactive as interactive_mod
+
+    with patch("builtins.input", side_effect=KeyboardInterrupt), pytest.raises(KeyboardInterrupt):
+        interactive_mod.read_prompt()
+
+    assert capsys.readouterr().out == "\n"
+
+
+def test_read_prompt_ends_the_line_at_end_of_input(capsys) -> None:
+    """Ctrl+D leaves the cursor on the ``> `` line too; the shell prompt follows it."""
+    from llm_cli_py.session import interactive as interactive_mod
+
+    with patch("builtins.input", side_effect=EOFError), pytest.raises(EOFError):
+        interactive_mod.read_prompt()
+
+    assert capsys.readouterr().out == "\n"
+
+
+def test_read_prompt_adds_nothing_after_enter(capsys) -> None:
+    """A line finished with Enter is already terminated: no second newline."""
+    from llm_cli_py.session import interactive as interactive_mod
+
+    with patch("builtins.input", return_value="hello"):
+        assert interactive_mod.read_prompt() == "hello"
+
+    assert capsys.readouterr().out == ""

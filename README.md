@@ -69,9 +69,17 @@ substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
 `execute_python`.
 
 There are no slash commands, no prompt history and no stdin piping: every line
-you type at the `> ` prompt is sent to the model as a new turn, and Ctrl+D ends
-the session. A line starting with `/` is ordinary prompt text, so nothing needs
-escaping.
+you type at the `> ` prompt is sent to the model as a new turn. A line starting
+with `/` is ordinary prompt text, so nothing needs escaping.
+
+End the session with end-of-input -- **Ctrl+D** on Linux/macOS, **Ctrl+Z then
+Enter** on Windows (that is where the terminal reports end-of-file; Windows has
+no Ctrl+D). A stray **Ctrl+C** at the prompt abandons the line being typed and
+returns to a fresh prompt; `Ctrl+C` while a request or a tool is running
+interrupts that operation instead. Neither key transmits what Enter would, so
+the CLI prints the missing newline itself: whatever is written after a stray
+Ctrl+C, and your shell prompt after Ctrl+D, start on a line of their own
+instead of being appended to `> `.
 
 With a prompt on the command line the CLI answers it first and then keeps
 prompting; assistant answers and tool output go to stdout, so output can be
