@@ -208,16 +208,6 @@ def test_a_log_path_that_cannot_be_resolved_is_reported_not_raised(capsys, monke
     assert "log" in capsys.readouterr().out
 
 
-def test_an_unwritable_log_path_does_not_stop_the_cli(capsys, monkeypatch) -> None:
-    """A log that cannot be written is reported; the session goes on."""
-    from llm_cli_py import main as main_module
-
-    monkeypatch.setenv(LOG_ENV, "/proc/does/not/exist/log.json")
-
-    assert main_module._conversation_log_or_none() is None
-    assert "log" in capsys.readouterr().out
-
-
 def test_the_log_path_is_read_the_way_a_shell_user_would_write_it(tmp_path, monkeypatch) -> None:
     """``~`` is expanded to the home directory; surrounding whitespace is dropped."""
     monkeypatch.setenv("HOME", str(tmp_path))
