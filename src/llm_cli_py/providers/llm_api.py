@@ -137,7 +137,7 @@ class LlmApiClient(LlmClient):
     def _build_user_message(self, prompt: str) -> None:
         """Append the user turn carrying ``prompt`` verbatim to the conversation."""
         if prompt.strip():
-            self._state.conversation.append(Message(role=Role.USER, content=prompt.strip()))
+            self.remember(Message(role=Role.USER, content=prompt.strip()))
 
     def _record_assistant(self, result: LlmResponse) -> None:
         """Append the assistant response (text/tool_calls) to the history."""
@@ -162,7 +162,7 @@ class LlmApiClient(LlmClient):
             else None
         )
 
-        self._state.conversation.append(
+        self.remember(
             Message(
                 role=Role.ASSISTANT,
                 content=result.text or "",

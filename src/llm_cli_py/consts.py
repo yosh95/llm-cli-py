@@ -28,6 +28,23 @@ as a constructor argument -- it is seeded as the first conversation message.
 When unset or empty, no system message is sent.
 """
 
+ENV_LOG_FILE = "LLM_CLI_LOG_FILE"
+"""Environment variable holding the file the conversation is written to.
+
+Unset (the default) means no log is kept at all. When set, the whole
+conversation -- user turns, assistant replies, tool calls and tool results -- is
+written there as JSON, and rewritten as it grows, so what is on disk is always
+the conversation as it stood.
+"""
+
+ENV_PROMPT_HISTORY_FILE = "LLM_CLI_PROMPT_HISTORY_FILE"
+"""Environment variable holding the file the prompt history (arrow keys) uses.
+
+Unset (the default) keeps the prompt history in memory only: the arrow keys
+still recall earlier turns of the current run, but nothing is written to disk
+and nothing survives the session.
+"""
+
 DEFAULT_API_URL = "http://localhost:11434/v1"
 """Example LLM API base URL (OpenAI-compatible endpoint).
 

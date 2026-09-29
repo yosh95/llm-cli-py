@@ -13,21 +13,27 @@ import contextlib
 import os
 import sys
 
+from prompt_toolkit import PromptSession
+
 from . import __version__
 from .consts import (
     DEFAULT_API_URL,
     DEFAULT_REQUEST_TIMEOUT,
     ENV_API_KEY,
     ENV_API_URL,
+    ENV_LOG_FILE,
     ENV_MODEL,
     ENV_SYSTEM_PROMPT,
 )
+from .models import ClientState
 from .providers.llm_api import LlmApiClient
-from .session.interactive import run_interactive
+from .session.interactive import make_prompt_session, run_interactive
 from .session.session import ActiveSession, SessionContext
+from .session.transcript import ConversationLog
 from .sources import build_prompt
 from .tools import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, ToolRegistry, execute_python
 from .ui import display as ui_display
+from .utils.fileio import UNUSABLE_PATH
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,6 +78,49 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"API key. Overrides {ENV_API_KEY} env var.",
     )
     return parser
+
+
+def _prompt_session_or_none() -> PromptSession[str] | None:
+    """Build the prompt session, or report why not and do without.
+
+    This is the one step that can fail for reasons outside the CLI's control:
+    ``LLM_CLI_PROMPT_HISTORY_FILE`` may name a file whose directory cannot be
+    created, or lie in a read-only place. History is a convenience -- a prompt
+    without it still works -- so the failure is reported and the caller falls
+    back to the default session.
+    """
+    try:
+        return make_prompt_session()
+    except UNUSABLE_PATH as e:
+        ui_display.report_error(f"Could not open the prompt history file: {e}")
+        ui_display.report_info("Continuing in memory; the arrow keys will not outlive this run.")
+        return None
+
+
+def _conversation_log_or_none() -> ConversationLog | None:
+    """Build the log named by ``LLM_CLI_LOG_FILE``, or ``None`` when unset.
+
+    Unset is the default and means no file is written at all. When set, the file
+    is touched once here, so a path that cannot be written says so at startup
+    rather than at the end of the first turn; the log then disables itself and
+    the run continues without it.
+    """
+    configured = os.environ.get(ENV_LOG_FILE, "").strip()
+    if not configured:
+        return None
+
+    try:
+        log = ConversationLog(configured)
+        # An empty conversation with no model: this creates the file (and its
+        # directory), so a path that cannot be written says so now rather than
+        # at the end of the first turn.
+        log.save(ClientState())
+    except UNUSABLE_PATH as e:
+        ui_display.report_error(f"Could not use the conversation log {configured!r}: {e}")
+        ui_display.report_info("Continuing without a log.")
+        return None
+
+    return None if log.disabled else log
 
 
 def initialize_tools() -> ToolRegistry:
@@ -152,8 +201,16 @@ def main() -> None:
     ctx = SessionContext(
         tool_registry=tool_registry,
     )
+    # ── Optional conversation log ──────────────────────────────────
+    # Unset LLM_CLI_LOG_FILE means no file; when set, the conversation is
+    # rewritten there as it grows, tool calls included, so an interrupted run
+    # still leaves what had been recorded.
+    log = _conversation_log_or_none()
+    if log is not None:
+        client.observe(log)
+
     session = ActiveSession(client, ctx)
-    run_interactive(session, prompt)
+    run_interactive(session, prompt, _prompt_session_or_none())
 
 
 if __name__ == "__main__":

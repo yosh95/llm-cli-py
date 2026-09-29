@@ -16,7 +16,9 @@ Python-execution tool.
   editing an env var
 - **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn
   per line, kept open until you end it (Ctrl+D); a prompt on the command line is
-  answered first, then the same prompt continues
+  answered first, then the same prompt continues. `prompt_toolkit`'s own key
+  bindings are kept: the arrow keys recall earlier turns, and Ctrl+X Ctrl+E opens
+  the line in your editor
 - **Minimal dependencies** — `requests`, `prompt_toolkit`
 
 ## Install
@@ -89,10 +91,27 @@ substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
 `execute_python`.
 
 There are no slash commands and no stdin piping: input is read from the terminal
-by `prompt_toolkit` (a pipe is not a source of turns), the prompt keeps no
-history -- the arrow keys do not bring an earlier line back -- and every line you
-type at the `> ` prompt is sent to the model as a new turn. A line starting with
-`/` is ordinary prompt text, so nothing needs escaping.
+by `prompt_toolkit` (a pipe is not a source of turns), and every line you type at
+the `> ` prompt is sent to the model as a new turn. A line starting with `/` is
+ordinary prompt text, so nothing needs escaping.
+
+The prompt is a full `prompt_toolkit` session, so its standard key bindings are
+there:
+
+- **Arrow keys** (and Ctrl+R) walk back through earlier turns. This is the
+  prompt's own history, not the conversation -- recalling a line only puts it
+  back on the line, and it is pressing Enter that sends it.
+- **Ctrl+X Ctrl+E** opens the line in `$VISUAL` / `$EDITOR` and applies what you
+  save as the turn, which is what makes a long, multi-line prompt pleasant to
+  write. The editor is the usual `$VISUAL`, then `$EDITOR`, then the platform's
+  list (nano, vi, ...).
+
+By default that history lives in memory: the arrow keys recall earlier turns of
+the current run and nothing is written to disk. Set
+`LLM_CLI_PROMPT_HISTORY_FILE=/path/to/history` and it is kept in that file
+instead, so turns come back in later runs too; the newest 1000 are read back at
+the prompt, older ones stay in the file unread. If the file cannot be opened,
+the CLI reports it and carries on in memory.
 
 End the session with end-of-input -- **Ctrl+D** on Linux/macOS, **Ctrl+Z then
 Enter** on Windows (that is where the terminal reports end-of-file; Windows has
@@ -119,7 +138,56 @@ llm-cli-py -m gpt-4o "Write a haiku about JSON" > haiku.txt
 | `LLM_CLI_API_KEY` | API key (optional for local instances). Overridden by `--api-key`. |
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
 | `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
+| `LLM_CLI_PROMPT_HISTORY_FILE` | File the prompt history is kept in, so the arrow keys recall earlier turns across runs. Unset (the default) keeps the history in memory for the current run only. |
+| `LLM_CLI_LOG_FILE` | File the whole conversation is logged to as JSON, tool calls and tool results included. Unset (the default) writes no log at all. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
+
+### Writing Paths in the Environment
+
+Both `LLM_CLI_LOG_FILE` and `LLM_CLI_PROMPT_HISTORY_FILE` are read the way you
+wrote them, without needing the shell to help:
+
+- **`~`** is expanded against the home directory (`USERPROFILE` on Windows), so
+  `~/logs/session.json` works.
+- **Spaces need no escaping**: `C:\Users\me\My Logs\session.json` is fine, as
+  is `~/My Logs/history`.
+- **Surrounding quotes are dropped**, because `cmd.exe` keeps them in the value:
+  `set LLM_CLI_LOG_FILE="C:\My Logs\log.json"` works, and so does the same line
+  in PowerShell, or GitBash's `~/My Logs/log.json`. One pair, `"..."` or `'...'`,
+  at either end.
+- **Surrounding blanks are ignored.**
+- **Parent directories are created**, in both cases.
+- `$VAR` is *not* expanded -- that is the shell's job, so write
+  `LLM_CLI_LOG_FILE=~/logs/$(date +%F).json` and let the shell do it.
+
+A path that cannot be resolved (no home directory to expand `~` against) or
+cannot be opened is reported, and that feature is dropped for the run: without a
+usable history file the prompt keeps its history in memory, and without a usable
+log file nothing is logged. Neither stops the session.
+
+### Logging the Conversation
+
+Set `LLM_CLI_LOG_FILE` and the whole conversation is written to that file as
+JSON -- user turns, assistant replies, tool calls (name and arguments) and tool
+results -- so a run can be read back afterwards:
+
+```bash
+LLM_CLI_LOG_FILE=~/.local/state/llm-cli/session.json llm-cli-py -m gpt-4o
+```
+
+The file is rewritten as the conversation grows, so what is on disk is always the
+conversation as it stood, including after a run that ends badly: a request that
+fails, a tool that hangs, a `kill`, or a Ctrl+C halfway through a turn all leave
+everything recorded up to that point, as one parseable JSON document. (The
+exception is a turn that is deliberately *discarded* -- a tool call whose
+arguments did not parse, or an interrupted tool run -- which is rolled back out
+of the conversation, and out of the log with it, because that is what the model
+will be sent next.)
+
+Writes are atomic (temporary file plus rename), so a reader never sees half a
+document. Unset `LLM_CLI_LOG_FILE` -- the default -- and nothing is written at
+all; `LLM_CLI_LOG_FILE=/dev/null` also turns it off. A path that cannot be
+written is reported at startup and the run continues without a log.
 
 ### Example: Web Search Without a Search Tool
 

@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Protocol
 
 from .models import ClientState, LlmResponse, Message, Role, ToolSchema
+
+
+class ConversationObserver(Protocol):
+    """A hook that watches the conversation change.
+
+    Implemented by the optional transcript (``session.transcript``): the client
+    tells the observer about each recorded message, and the observer decides what
+    -- if anything -- to do with it. The client itself never learns whether
+    anything is listening, so a run without a log pays nothing for the hook.
+    """
+
+    def message_recorded(self, state: ClientState, message: Message) -> None:
+        """Called once ``message`` has been appended to ``state``."""
+        ...
+
+    def turn_discarded(self, state: ClientState) -> None:
+        """Called once a turn has been rolled back out of ``state``."""
+        ...
 
 
 class LlmClient(ABC):
@@ -26,10 +45,31 @@ class LlmClient(ABC):
             model=model,
             conversation=([Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else []),
         )
+        # Nothing is watching unless a log file was configured; see observe.
+        self._observer: ConversationObserver | None = None
 
     @property
     def state(self) -> ClientState:
         return self._state
+
+    def observe(self, observer: ConversationObserver) -> None:
+        """Have ``observer`` be told about every change to the conversation.
+
+        Set after construction (rather than passed in) so the log stays optional
+        and the client is complete without one.
+        """
+        self._observer = observer
+
+    def remember(self, message: Message) -> None:
+        """Append ``message`` to the conversation and show it to the observer.
+
+        The one place a message is recorded, so the log cannot miss a turn: the
+        system prompt, user turns, assistant replies (tool calls included) and
+        tool results all go through here.
+        """
+        self._state.conversation.append(message)
+        if self._observer is not None:
+            self._observer.message_recorded(self._state, message)
 
     def rollback_last_turn(self) -> None:
         """Discard the assistant reply recorded for the current turn.
@@ -46,6 +86,8 @@ class LlmClient(ABC):
         for index in range(len(conversation) - 1, -1, -1):
             if conversation[index].role is Role.ASSISTANT:
                 del conversation[index:]
+                if self._observer is not None:
+                    self._observer.turn_discarded(self._state)
                 return
 
     @abstractmethod

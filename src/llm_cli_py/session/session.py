@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from .. import ui
 from ..base import LlmClient
-from ..models import ClientState, Message, Role, ToolCall
+from ..models import Message, Role, ToolCall
 from ..tools.registry import ToolRegistry
 from ..tools.types import ToolResult, normalise_tool_result
 
 
-def _append_tool_message(state: ClientState, content: str, tool_call_id: str) -> None:
+def _append_tool_message(client: LlmClient, content: str, tool_call_id: str) -> None:
     """Add a tool result to the conversation.
 
     Tool output is part of the record the model reasons over, exactly like a
-    user or assistant message.
+    user or assistant message, so it is recorded through the client's
+    ``remember`` -- which is also what puts it in the log.
     """
-    state.conversation.append(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
+    client.remember(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
 
 
 class SessionContext:
@@ -125,14 +126,14 @@ class ActiveSession:
             if tool is None:
                 message = f"Tool '{tc.name}' not found"
                 ui.display.report_error(message)
-                _append_tool_message(self.client.state, message, tc.id)
+                _append_tool_message(self.client, message, tc.id)
                 continue
 
             try:
                 result = tool.func(**tc.arguments)
             except Exception as e:
                 ui.display.report_error(f"Tool '{tc.name}' failed: {e}")
-                _append_tool_message(self.client.state, str(e), tc.id)
+                _append_tool_message(self.client, str(e), tc.id)
                 continue
 
             # A tool that returned something other than ExecResult/ToolError is
@@ -140,4 +141,4 @@ class ActiveSession:
             # silently treating the value as a successful result.
             normalised: ToolResult = normalise_tool_result(result)
             ui.display.print_tool_result(normalised.as_display_lines())
-            _append_tool_message(self.client.state, normalised.as_tool_content(), tc.id)
+            _append_tool_message(self.client, normalised.as_tool_content(), tc.id)
