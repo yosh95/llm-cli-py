@@ -17,8 +17,9 @@ Python-execution tool.
 - **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn
   per line, kept open until you end it (Ctrl+D); a prompt on the command line is
   answered first, then the same prompt continues. `prompt_toolkit`'s own key
-  bindings are kept: the arrow keys recall earlier turns, and Ctrl+X Ctrl+E opens
-  the line in your editor
+  bindings are kept: the arrow keys recall earlier turns, Ctrl+X Ctrl+E opens the
+  line in your editor, and Ctrl+Z suspends the CLI on Unix (where there is a
+  `SIGTSTP` to send)
 - **Minimal dependencies** — `requests`, `prompt_toolkit`
 
 ## Install
@@ -105,6 +106,11 @@ there:
   save as the turn, which is what makes a long, multi-line prompt pleasant to
   write. The editor is the usual `$VISUAL`, then `$EDITOR`, then the platform's
   list (nano, vi, ...).
+- **Ctrl+Z** suspends the CLI -- on Unix, and there only. The process is stopped
+  the way any job is, so the shell gets the terminal back (`[1]+ Stopped
+  llm-cli-py`), and `fg` puts you back at the `> ` prompt with the half-typed
+  line still on it. Windows has no `SIGTSTP` to send, so there the key keeps
+  `prompt_toolkit`'s own meaning, which is the end-of-input below.
 
 By default that history lives in memory: the arrow keys recall earlier turns of
 the current run and nothing is written to disk. Set
@@ -115,12 +121,12 @@ the CLI reports it and carries on in memory.
 
 End the session with end-of-input -- **Ctrl+D** on Linux/macOS, **Ctrl+Z then
 Enter** on Windows (that is where the terminal reports end-of-file; Windows has
-no Ctrl+D). A stray **Ctrl+C** at the prompt abandons the line being typed and
-returns to a fresh prompt; `Ctrl+C` while a request or a tool is running
-interrupts that operation instead. Aborting the prompt already ends the line
-`> ` opened, so the next output -- the rule of the following turn, or your shell
-prompt after Ctrl+D -- follows the abandoned prompt directly, with no blank line
-in between.
+no Ctrl+D, and no `SIGTSTP` for Ctrl+Z to suspend with either). A stray
+**Ctrl+C** at the prompt abandons the line being typed and returns to a fresh
+prompt; `Ctrl+C` while a request or a tool is running interrupts that operation
+instead. Aborting the prompt already ends the line `> ` opened, so the next
+output -- the rule of the following turn, or your shell prompt after Ctrl+D --
+follows the abandoned prompt directly, with no blank line in between.
 
 With a prompt on the command line the CLI answers it first and then keeps
 prompting; assistant answers and tool output go to stdout, so output can be

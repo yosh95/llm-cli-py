@@ -9,10 +9,11 @@ Input is read from the terminal using prompt_toolkit; there is no other way in
 (no stdin piping, no slash commands), and every line you type at the ``> ``
 prompt is a new turn. The prompt is a full prompt_toolkit session rather than a
 bare line reader, so the key bindings that come with it are available: the arrow
-keys (and Ctrl+R) walk back through earlier turns, and Ctrl+X Ctrl+E opens the
-line in your editor (``$VISUAL`` / ``$EDITOR``) and sends what you save. That
-history is the session's own; what the model sees is the conversation kept by
-``ActiveSession``. It is kept in memory unless
+keys (and Ctrl+R) walk back through earlier turns, Ctrl+X Ctrl+E opens the line
+in your editor (``$VISUAL`` / ``$EDITOR``) and sends what you save, and Ctrl+Z
+suspends the CLI where the platform has ``SIGTSTP`` to send (see
+``SUSPEND_SUPPORTED``). That history is the session's own; what the model sees is
+the conversation kept by ``ActiveSession``. It is kept in memory unless
 ``LLM_CLI_PROMPT_HISTORY_FILE`` names a file, in which case it is read from and
 written to that file instead and therefore survives the run. A stray Ctrl+C at
 the prompt returns to it, with the half-typed line abandoned; end of input ends the session -- Ctrl+D on
@@ -35,6 +36,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory, History, InMemoryHistory
 from prompt_toolkit.input import Input, create_input
 from prompt_toolkit.output import Output, create_output
+from prompt_toolkit.utils import suspend_to_background_supported
 
 from .. import ui
 from ..consts import ENV_PROMPT_HISTORY_FILE
@@ -45,6 +47,16 @@ PROMPT_TEXT = "> "
 
 DEFAULT_HISTORY_LIMIT = 1000
 """How many recent turns the prompt keeps for the arrow keys, at most."""
+
+SUSPEND_SUPPORTED = suspend_to_background_supported()
+"""Whether Ctrl+Z can suspend the CLI: does this platform have ``SIGTSTP``?
+
+True on Unix, where Ctrl+Z then stops the process the way it stops any job, and
+the shell (or whatever else has job control) takes it from there -- the prompt
+comes back after ``fg``, with the half-typed line still on it. False on Windows,
+which has no ``SIGTSTP``; there Ctrl+Z keeps ``prompt_toolkit``'s default
+behaviour and nothing else about the prompt changes.
+"""
 
 
 class LimitedFileHistory(FileHistory):
@@ -105,7 +117,9 @@ def make_prompt_session(
     The history is ``LLM_CLI_PROMPT_HISTORY_FILE`` (or ``history_file``, which
     tests pass): a file when it names one, memory when it does not.
     ``enable_open_in_editor`` turns on Ctrl+X Ctrl+E, which also applies the
-    edited text as the turn, as at a readline prompt.
+    edited text as the turn, as at a readline prompt. ``enable_suspend`` turns on
+    Ctrl+Z (where the platform supports it; see ``SUSPEND_SUPPORTED``), so the
+    CLI can be put in the background and brought back with ``fg``.
 
     ``output`` and ``input`` are built explicitly rather than left to
     ``PromptSession``'s own defaults, which are resolved from ``sys.stdin`` /
@@ -120,6 +134,11 @@ def make_prompt_session(
     return PromptSession(
         history=history,
         enable_open_in_editor=True,
+        # Ctrl+Z suspends on Unix: prompt_toolkit stops the process with
+        # SIGTSTP, exactly the key readline binds to suspend. Without SIGTSTP to
+        # send (Windows) the condition is false and the key keeps
+        # prompt_toolkit's own binding, so the prompt is untouched there.
+        enable_suspend=SUSPEND_SUPPORTED,
         output=output_factory(),
         input=input_factory(),
     )

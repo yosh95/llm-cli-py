@@ -7,7 +7,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from prompt_toolkit.history import FileHistory
@@ -128,6 +128,69 @@ def test_read_prompt_adds_nothing_after_enter(capsys) -> None:
     assert interactive_mod.read_prompt(prompt_session) == "hello"
     prompt_session.prompt.assert_called_once_with("> ")
     assert capsys.readouterr().out == ""
+
+
+def _ctrl_z_through_the_prompt(monkeypatch, supported: bool, typed: str) -> tuple[str, int]:
+    """Feed ``^Z`` + ``typed`` to a prompt session built with ``supported``.
+
+    Returns the accepted line and how many times the session asked to be
+    suspended. ``Application.suspend_to_background`` is where Ctrl+Z ends up, so
+    it is replaced: actually suspending would put the test itself in the
+    background.
+    """
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from llm_cli_py.session import interactive as interactive_mod
+
+    monkeypatch.setattr(interactive_mod, "SUSPEND_SUPPORTED", supported)
+
+    with create_pipe_input() as pipe_input:
+        prompt_session = interactive_mod.make_prompt_session(
+            input_factory=lambda: pipe_input,
+            output_factory=DummyOutput,
+        )
+        with patch.object(Application, "suspend_to_background") as suspend:
+            pipe_input.send_text("\x1a" + typed + "\r")
+            line = prompt_session.prompt("> ")
+
+    return line, suspend.call_count
+
+
+def test_ctrl_z_suspends_the_cli_where_the_platform_supports_it(monkeypatch) -> None:
+    """Where there is a ``SIGTSTP`` to send, Ctrl+Z is the suspend key.
+
+    That is how it behaves at a shell's own prompt: the process is stopped, and
+    the line typed so far is still there after ``fg``. Suspending is the
+    session's job -- this only checks that the key asks for it, once, and that
+    the prompt carries on without the key ending up in the line.
+    """
+    line, suspends = _ctrl_z_through_the_prompt(monkeypatch, supported=True, typed="hello")
+
+    assert suspends == 1
+    assert line == "hello"
+
+
+def test_ctrl_z_keeps_its_default_meaning_where_suspending_is_unsupported(monkeypatch) -> None:
+    """Without ``SIGTSTP`` (Windows) the key is left alone.
+
+    Nothing is suspended, and prompt_toolkit's own binding stands: Ctrl+Z
+    inserts itself, so ``^Z`` + Enter still reaches the CLI as end-of-input.
+    """
+    line, suspends = _ctrl_z_through_the_prompt(monkeypatch, supported=False, typed="abc")
+
+    assert suspends == 0
+    assert line == "\x1aabc"
+
+
+def test_suspending_is_enabled_exactly_where_the_platform_can_do_it() -> None:
+    """The flag is the platform's answer, so the feature stays Unix-only."""
+    import signal
+
+    from llm_cli_py.session import interactive as interactive_mod
+
+    assert interactive_mod.SUSPEND_SUPPORTED is hasattr(signal, "SIGTSTP")
 
 
 def test_a_turn_typed_at_the_prompt_is_written_to_the_history_file(tmp_path, monkeypatch) -> None:

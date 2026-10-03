@@ -213,7 +213,9 @@ def execute_python(
             errors="replace",
             env=env,
             # Own session = own process group. The terminal's Ctrl+C therefore
-            # skips the executed code, which is killed explicitly below instead.
+            # skips the executed code, which is killed explicitly below instead;
+            # Ctrl+Z at the prompt, which stops the CLI, does not reach the code
+            # either -- the code keeps running while the CLI is suspended.
             start_new_session=True,
         )
         stdout, stderr = proc.communicate()
