@@ -54,6 +54,26 @@ def _resolve_child_python() -> str:
     raise RuntimeError(msg)
 
 
+def _shell_dropped_argument(arguments: list[ast.expr]) -> str | None:
+    """Name the argument a shell would ignore, for the refusal message, or ``None``.
+
+    ``shell=True`` uses the command string -- the list's first element -- and
+    ignores everything after it, so those are the arguments worth quoting back:
+    preferring one carrying a shell metacharacter, whose loss is least obvious.
+    ``None`` means there is no readable string to point at.
+    """
+    dropped = arguments[1:] or arguments
+    literals = [
+        element.value
+        for element in dropped
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+    return next(
+        (text for text in literals if any(meta in text for meta in _SHELL_META)),
+        literals[0] if literals else None,
+    )
+
+
 def _check_shell_true_with_list(code: str) -> str | None:
     """Return an explanation if ``code`` calls subprocess with ``shell=True`` and an argv list.
 
@@ -83,58 +103,41 @@ def _check_shell_true_with_list(code: str) -> str | None:
         return None
 
     class _Checker(ast.NodeVisitor):
+        """Report the first refused ``subprocess`` call of the shape this check exists for."""
+
         def __init__(self) -> None:
             self.error: str | None = None
 
         def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
             if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "subprocess"
-                and node.func.attr in ("run", "Popen", "call", "check_call", "check_output")
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "subprocess"
+                and func.attr in ("run", "Popen", "call", "check_call", "check_output")
             ):
-                has_shell_true = False
-                for kw in node.keywords:
-                    if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                        has_shell_true = True
-                        break
-                if not has_shell_true:
-                    return
-
-                if not node.args:
-                    return
-                first_arg = node.args[0]
-                if not isinstance(first_arg, ast.List):
-                    return
-
-                # Quote the first element that a shell would treat specially:
-                # these are the arguments the call site most likely meant to
-                # pass and the shell will silently ignore.
-                suspect = next(
-                    (
-                        str(elt.value)
-                        for elt in first_arg.elts
-                        if isinstance(elt, ast.Constant)
-                        and isinstance(elt.value, str)
-                        and any(meta in elt.value for meta in _SHELL_META)
-                    ),
-                    first_arg.elts[0] if first_arg.elts else "",
+                has_shell_true = any(
+                    kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                    for kw in node.keywords
                 )
-                lineno = getattr(node, "lineno", "?")
-                self.error = (
-                    f"[L{lineno}] subprocess.{node.func.attr}(..., shell=True) "
-                    f"was NOT run\n"
-                    f"  Problem: shell=True takes one command *string*, so the "
-                    f"remaining list items are ignored\n"
-                    f"           ({suspect!r} would be dropped or mishandled)\n"
-                    f"  Result: the command runs differently from what the code says "
-                    f"(it does not hang)\n"
-                    f"  BAD: subprocess.run(['cmd', '--flag'], shell=True)\n"
-                    f"  GOOD: subprocess.run(['cmd', '--flag'])\n"
-                    f"        subprocess.run('cmd --flag', shell=True)  # "
-                    f"single string, if a shell is really wanted\n"
-                )
-                return
+                first_arg = node.args[0] if node.args else None
+                if has_shell_true and isinstance(first_arg, ast.List):
+                    dropped = _shell_dropped_argument(first_arg.elts)
+                    shown = repr(dropped) if dropped is not None else "a non-literal argument"
+                    lineno = getattr(node, "lineno", "?")
+                    self.error = (
+                        f"[L{lineno}] subprocess.{func.attr}(..., shell=True) was NOT run\n"
+                        f"  Problem: shell=True takes one command *string*, so the "
+                        f"remaining list items are ignored\n"
+                        f"           ({shown} would be dropped or mishandled)\n"
+                        f"  Result: the command runs differently from what the code says "
+                        f"(it does not hang)\n"
+                        f"  BAD: subprocess.run(['cmd', '--flag'], shell=True)\n"
+                        f"  GOOD: subprocess.run(['cmd', '--flag'])\n"
+                        f"        subprocess.run('cmd --flag', shell=True)  # "
+                        f"single string, if a shell is really wanted\n"
+                    )
+                    return
             self.generic_visit(node)
 
     c = _Checker()

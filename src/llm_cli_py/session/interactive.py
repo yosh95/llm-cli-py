@@ -84,7 +84,7 @@ class LimitedFileHistory(FileHistory):
         return islice(strings, self.limit)
 
 
-def _make_history(configured: str) -> tuple[History, Path | None]:
+def _make_history(configured: str) -> History:
     """Build the prompt history for ``configured`` (the env var's value).
 
     Unset means memory: ``InMemoryHistory`` gives the arrow keys and Ctrl+R back
@@ -100,11 +100,11 @@ def _make_history(configured: str) -> tuple[History, Path | None]:
     """
     configured = configured.strip()
     if not configured:
-        return InMemoryHistory(), None
+        return InMemoryHistory()
 
     path = clean_path(configured)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return LimitedFileHistory(path), path
+    return LimitedFileHistory(path)
 
 
 def make_prompt_session(
@@ -129,7 +129,7 @@ def make_prompt_session(
     """
     if history_file is None:
         history_file = os.environ.get(ENV_PROMPT_HISTORY_FILE, "")
-    history, _ = _make_history(str(history_file))
+    history = _make_history(str(history_file))
 
     return PromptSession(
         history=history,
