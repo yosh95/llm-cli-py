@@ -243,3 +243,31 @@ def test_a_history_path_that_cannot_be_resolved_falls_back_to_memory(capsys, mon
 
     assert main_module._prompt_session_or_none() is None
     assert "history" in capsys.readouterr().out
+
+
+def test_ctrl_c_during_the_first_turn_returns_to_the_prompt() -> None:
+    """The command-line turn is not a prompt: an interrupt there must not end the CLI.
+
+    Ctrl+C while a tool runs is raised out of ``process_and_print`` (the turn is
+    rolled back on the way). At the prompt the loop catches it; the first turn,
+    which comes from argv, used to let it out of ``run_interactive`` and kill the
+    process with a traceback.
+    """
+    from llm_cli_py.session import interactive as interactive_mod
+
+    class _Session:
+        def __init__(self) -> None:
+            self.turns = 0
+
+        def process_and_print(self, _text: str) -> None:
+            self.turns += 1
+            if self.turns == 1:
+                raise KeyboardInterrupt
+
+    session = _Session()
+    prompt_session = MagicMock()
+    prompt_session.prompt.side_effect = EOFError
+
+    interactive_mod.run_interactive(session, "first", prompt_session)  # type: ignore[arg-type]
+
+    assert session.turns == 1

@@ -133,6 +133,24 @@ def test_an_interrupted_tool_call_does_not_leave_a_dangling_request(session) -> 
     assert [(m.role.value, m.content) for m in session.client.state.conversation] == [("user", "Run it")]
 
 
+def test_an_interrupted_tool_run_says_so(session, capsys) -> None:
+    """The status line stops at the interrupt, so the transcript says what became of the run."""
+
+    def interrupted(**_kwargs: object) -> ExecResult:
+        raise KeyboardInterrupt
+
+    register(session.ctx.tool_registry, "slow", interrupted)
+    response = completion(tool_calls=[tool_call("c1", "slow", "{}")])
+
+    with (
+        patch("llm_cli_py.providers.llm_api.post_json", return_value=response),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        session.process_and_print("Run it")
+
+    assert "Interrupted" in capsys.readouterr().out
+
+
 def test_rolling_back_without_an_assistant_reply_does_nothing(session) -> None:
     """``rollback_last_turn`` is a no-op when there is nothing to undo."""
     session.client.state.conversation.append(Message(role=Role.USER, content="hello"))

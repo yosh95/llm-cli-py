@@ -95,7 +95,10 @@ class ActiveSession:
             except KeyboardInterrupt:
                 # Ctrl+C while a tool is running leaves the same half-finished
                 # reply (tool_calls whose results were never appended); drop it
-                # before the interrupt returns the user to the prompt.
+                # before the interrupt returns the user to the prompt. The status
+                # line ended at the moment of the interrupt, so say what happened
+                # to the run it was timing.
+                ui.display.report_info("Interrupted: the tool run was stopped and the turn discarded.")
                 self.client.rollback_last_turn()
                 raise
 

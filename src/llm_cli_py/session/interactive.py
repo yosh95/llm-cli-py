@@ -27,6 +27,7 @@ own. Nothing is printed here to add to it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Callable, Iterable
 from itertools import islice
@@ -182,8 +183,13 @@ def run_interactive(
             exits.
         prompt_session: Optional prompt_toolkit PromptSession to read input with.
     """
+    # Ctrl+C while the command-line turn is running means the same thing here as
+    # it does in the loop below: the operation is abandoned and the prompt takes
+    # over. Letting it out of the function would end the CLI with a traceback
+    # instead -- this turn came from argv, not from a prompt that was closed.
     if initial_prompt:
-        session.process_and_print(initial_prompt)
+        with contextlib.suppress(KeyboardInterrupt):
+            handle_user_input(session, initial_prompt)
 
     if prompt_session is None:
         prompt_session = make_prompt_session()
