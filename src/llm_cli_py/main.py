@@ -204,6 +204,7 @@ def main() -> None:
         api_key=api_key,
         timeout=DEFAULT_REQUEST_TIMEOUT,
         system_prompt=system_prompt,
+        timer_factory=clock.timer,
     )
     ctx = SessionContext(
         tool_registry=tool_registry,

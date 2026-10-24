@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Protocol
 
 from .models import ClientState, LlmResponse, Message, Role, ToolSchema
+from .utils.clock import Timer
 
 
 class ConversationObserver(Protocol):
@@ -29,7 +31,13 @@ class ConversationObserver(Protocol):
 class LlmClient(ABC):
     """Abstract base class for LLM API clients."""
 
-    def __init__(self, model: str, *, system_prompt: str = "") -> None:
+    def __init__(
+        self,
+        model: str,
+        *,
+        system_prompt: str = "",
+        timer_factory: Callable[[], Timer] = Timer,
+    ) -> None:
         """Initialize state, seeding ``system_prompt`` as the first message.
 
         The prompt is supplied by the caller (the CLI composition root reads
@@ -40,6 +48,10 @@ class LlmClient(ABC):
         make later turns inconsistent with earlier context. When empty, no
         system message is seeded (no default/date prompt is injected), and the
         seeded message is the only place the prompt is kept.
+
+        ``timer_factory`` builds the timer each request is measured with, so how
+        long the model took is recorded next to what it said. Tests pass a
+        scripted timer instead of waiting for a real one.
         """
         self._state = ClientState(
             model=model,
@@ -47,6 +59,7 @@ class LlmClient(ABC):
         )
         # Nothing is watching unless a log file was configured; see observe.
         self._observer: ConversationObserver | None = None
+        self._timer_factory = timer_factory
 
     @property
     def state(self) -> ClientState:

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from ..base import LlmClient
 from ..consts import DEFAULT_REQUEST_TIMEOUT
 from ..models import LlmResponse, Message, Role, ToolCall, ToolCallPayload, ToolSchema
+from ..utils.clock import Timer
 from ..utils.http import post_json
 
 
@@ -27,8 +29,9 @@ class LlmApiClient(LlmClient):
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
         *,
         system_prompt: str = "",
+        timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
-        super().__init__(model, system_prompt=system_prompt)
+        super().__init__(model, system_prompt=system_prompt, timer_factory=timer_factory)
         # The one endpoint this client talks to is fixed at construction, so the
         # base URL is never needed again (and a trailing "/" is harmless).
         self._endpoint = api_url.rstrip("/") + "/chat/completions"
@@ -139,7 +142,7 @@ class LlmApiClient(LlmClient):
         if prompt.strip():
             self.remember(Message(role=Role.USER, content=prompt.strip()))
 
-    def _record_assistant(self, result: LlmResponse) -> None:
+    def _record_assistant(self, result: LlmResponse, duration_ms: float | None = None) -> None:
         """Append the assistant response (text/tool_calls) to the history."""
         if not (result.text or result.tool_calls):
             return
@@ -167,6 +170,7 @@ class LlmApiClient(LlmClient):
                 role=Role.ASSISTANT,
                 content=result.text or "",
                 tool_calls=tool_calls_data,
+                duration_ms=duration_ms,
             )
         )
 
@@ -191,13 +195,18 @@ class LlmApiClient(LlmClient):
 
         messages = self._build_messages()
         body = self._build_request(messages, tool_schemas)
+
+        # Timed around the request only: building the body is this program's work,
+        # not the provider's, and it is never what a slow turn is about.
+        timer = self._timer_factory()
         payload = post_json(
             self._endpoint,
             body,
             self._timeout,
             api_key=self._api_key,
         )
+        duration_ms = timer.elapsed_ms()
 
         result = self._parse_response(payload)
-        self._record_assistant(result)
+        self._record_assistant(result, duration_ms)
         return result

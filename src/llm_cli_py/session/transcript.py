@@ -16,11 +16,16 @@ import json
 from pathlib import Path
 
 from .. import ui
-from ..models import ClientState, Message
+from ..models import ClientState, Message, Role
 from ..utils.fileio import UNUSABLE_PATH, clean_path, write_text_atomically
 
-LOG_FORMAT_VERSION = 1
-"""Version of the log layout (bumped when the shape below changes)."""
+LOG_FORMAT_VERSION = 2
+"""Version of the log layout (bumped when the shape below changes).
+
+2 added ``duration_ms`` to messages that were produced by a measured operation
+(a request to the model, a tool run). Readers of version 1 keep working: the
+field is additive and absent when nothing was measured.
+"""
 
 
 def message_record(message: Message) -> dict[str, object]:
@@ -36,6 +41,8 @@ def message_record(message: Message) -> dict[str, object]:
         record["tool_call_id"] = message.tool_call_id
     if message.tool_calls is not None:
         record["tool_calls"] = message.tool_calls
+    if message.duration_ms is not None:
+        record["duration_ms"] = message.duration_ms
     return record
 
 
@@ -46,12 +53,40 @@ def render(state: ClientState) -> str:
     the log afterwards: a tool call's arguments and result are what a failure is
     usually diagnosed from, and they are only legible indented.
     """
+    records = [message_record(message) for message in state.conversation]
     document: dict[str, object] = {
         "version": LOG_FORMAT_VERSION,
         "model": state.model,
-        "conversation": [message_record(message) for message in state.conversation],
+        "conversation": records,
     }
+    totals = _totals(records)
+    if totals:
+        document["durations_ms"] = totals
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+
+
+_DURATION_LABELS = {
+    Role.ASSISTANT: "llm",
+    Role.TOOL: "tool",
+}
+"""Which bucket a measured message's time belongs to: the model's or a tool's."""
+
+
+def _totals(records: list[dict[str, object]]) -> dict[str, float]:
+    """Sum the measured durations per kind, for a log that can be read at a glance.
+
+    The per-message numbers say where one slow turn went; the totals say it
+    without adding up eighteen of them by hand. Measured messages only, so a log
+    without any is written exactly as it was before.
+    """
+    totals: dict[str, float] = {}
+    for record in records:
+        kind = _DURATION_LABELS.get(Role(str(record["role"])))
+        duration = record.get("duration_ms")
+        if kind is None or not isinstance(duration, (int, float)):
+            continue
+        totals[kind] = round(totals.get(kind, 0.0) + float(duration), 1)
+    return totals
 
 
 class ConversationLog:
