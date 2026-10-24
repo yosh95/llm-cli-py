@@ -20,6 +20,9 @@ Python-execution tool.
   bindings are kept: the arrow keys recall earlier turns, Ctrl+X Ctrl+E opens the
   line in your editor, and Ctrl+Z suspends the CLI on Unix (where there is a
   `SIGTSTP` to send)
+- **Time on screen** — every line is stamped with the wall-clock time, every rule
+  carries the session's uptime, and a request or a tool run shows how long it has
+  been running, redrawn once a second
 - **Minimal dependencies** — `requests`, `prompt_toolkit`
 
 ## Install
@@ -136,6 +139,40 @@ redirected while you type:
 llm-cli-py -m gpt-4o "Write a haiku about JSON" > haiku.txt
 ```
 
+### Time in the transcript
+
+Every line is stamped with the wall-clock time it was written, and every rule
+carries, at its right end, how long the session has been running:
+
+```text
+[09:32:10] ──────────────────────────────────────────────── [+00:00:00]
+[09:32:10] gpt-4o is thinking... 2.5s
+[09:32:13] ──────────────────────────────────────────────── [+00:00:02]
+[09:32:13] [Tool] Executing tool: execute_python...
+[09:32:13] Args:
+  [code] import time; time.sleep(3); print("done")
+[09:32:16] [Tool] execute_python running... 3.0s
+[09:32:16] ──────────────────────────────────────────────── [+00:00:05]
+[09:32:16]   Tool Result:
+    Exit code: 0
+```
+
+A request to the model and a tool run are the two places where the CLI can go
+quiet for a long time. Each shows a status line that redraws itself once a
+second in place -- `2.5s`, `3.0s`, ... -- and the last reading stays on screen as
+the operation's duration. A counter that keeps moving is what tells a slow
+provider or a slow script apart from a stuck one; the stamps on the surrounding
+lines then say when it started and how long the gap really was.
+
+Durations are measured on a monotonic clock, so a system time adjustment during
+a long wait cannot produce a negative or absurd number. Stamps come from the wall
+clock, so they line up with the log file, another terminal, or your watch.
+
+When stdout is redirected to a file (or anything else that is not a terminal) the
+line is not redrawn -- carriage returns in a file are unreadable -- so nothing is
+written while the operation runs, and the same line, with the same duration, is
+printed once when it finishes. Stamps and uptimes are unaffected.
+
 ## Environment Variables
 
 | Variable | Description |
@@ -189,6 +226,24 @@ exception is a turn that is deliberately *discarded* -- a tool call whose
 arguments did not parse, or an interrupted tool run -- which is rolled back out
 of the conversation, and out of the log with it, because that is what the model
 will be sent next.)
+
+Each message that took time to produce carries that time as `duration_ms`: the
+`assistant` message the duration of the request that returned it, the `tool`
+message the duration of the tool run. They are the same numbers the status line
+showed. The document also totals them per kind, so a slow run can be accounted
+for without adding up every message:
+
+```json
+{ "role": "assistant", "content": "", "tool_calls": [...], "duration_ms": 2502.6 },
+{ "role": "tool", "content": "{\"stdout\": \"done\\n\"}", "tool_call_id": "c1", "duration_ms": 3012.2 },
+...
+"durations_ms": { "llm": 3505.0, "tool": 3012.2 }
+```
+
+User turns, the system prompt, and a call that never reached a tool carry no
+`duration_ms` -- nothing was measured for them -- and such a log has no
+`durations_ms` either. The field lives in the log only: the request body is built
+field by field, so nothing the API does not know about can be sent to it.
 
 Writes are atomic (temporary file plus rename), so a reader never sees half a
 document. Unset `LLM_CLI_LOG_FILE` -- the default -- and nothing is written at
