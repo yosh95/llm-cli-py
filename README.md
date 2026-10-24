@@ -21,9 +21,12 @@ Python-execution tool.
   line in your editor, and Ctrl+Z suspends the CLI on Unix (where there is a
   `SIGTSTP` to send)
 - **Time on screen** — every line is stamped with the wall-clock time, every rule
-  carries the session's uptime, and a request or a tool run shows how long it has
-  been running, redrawn once a second
-- **Minimal dependencies** — `requests`, `prompt_toolkit`
+  carries the session's uptime, and a request or a tool run shows a spinner and
+  how long it has been running
+- **Readable output** — answers are rendered as Markdown, code in a tool call is
+  syntax-highlighted, results are coloured by outcome: on a terminal only, so a
+  redirected transcript stays plain text
+- **Few dependencies** — `requests`, `prompt_toolkit`, `rich`
 
 ## Install
 
@@ -146,21 +149,27 @@ carries, at its right end, how long the session has been running:
 
 ```text
 [09:32:10] ──────────────────────────────────────────────── [+00:00:00]
-[09:32:10] gpt-4o is thinking... 2.5s
+⠸ [09:32:10] gpt-4o is thinking... 0.0s
+⠼ [09:32:11] gpt-4o is thinking... 1.0s
+  [09:32:13] gpt-4o is thinking... 2.5s
 [09:32:13] ──────────────────────────────────────────────── [+00:00:02]
 [09:32:13] [Tool] Executing tool: execute_python...
 [09:32:13] Args:
   [code] import time; time.sleep(3); print("done")
-[09:32:16] [Tool] execute_python running... 3.0s
+⠙ [09:32:13] [Tool] execute_python running... 0.0s
+  [09:32:16] [Tool] execute_python running... 3.0s
 [09:32:16] ──────────────────────────────────────────────── [+00:00:05]
-[09:32:16]   Tool Result:
+[09:32:16] Tool Result:
     Exit code: 0
+    [stdout]
+      done
 ```
 
 A request to the model and a tool run are the two places where the CLI can go
-quiet for a long time. Each shows a status line that redraws itself once a
-second in place -- `2.5s`, `3.0s`, ... -- and the last reading stays on screen as
-the operation's duration. A counter that keeps moving is what tells a slow
+quiet for a long time. Each shows a status line with a spinner and the time
+elapsed, redrawn in place ten times a second, and the last reading stays on
+screen -- spinner stopped, so a finished line is not mistaken for a running one
+-- as the operation's duration. A counter that keeps moving is what tells a slow
 provider or a slow script apart from a stuck one; the stamps on the surrounding
 lines then say when it started and how long the gap really was.
 
@@ -172,6 +181,27 @@ When stdout is redirected to a file (or anything else that is not a terminal) th
 line is not redrawn -- carriage returns in a file are unreadable -- so nothing is
 written while the operation runs, and the same line, with the same duration, is
 printed once when it finishes. Stamps and uptimes are unaffected.
+
+### What a terminal gets, and what a file gets
+
+Output is rendered with [`rich`](https://github.com/Textualize/rich), but only
+where it helps. In a terminal:
+
+- the assistant's answer is rendered as **Markdown** -- models write it, and
+  headings, lists and fenced code read better as such;
+- code in a tool call is **syntax-highlighted**, so the Python an agent is about
+  to run looks like code;
+- a tool result is **coloured by outcome**: a green `Exit code: 0`, a red failed
+  one, `[stdout]`/`[stderr]` as labels;
+- `NO_COLOR=1` turns the colours off (the usual convention, and `rich` honours
+  it).
+
+Everywhere else -- redirected to a file, piped to `pager`/`grep`, captured by a
+test -- the output is **plain text**, exactly as it was written: no escape
+sequences, no `•` bullets in place of `-`, no padding around code. A transcript
+saved to a file is its own source, and `llm-cli-py ... > answer.md` still writes
+the answer the model wrote. Markup characters in a model's or a tool's own text
+(`[INFO]`, `[1, 2]`) are never interpreted as styling.
 
 ## Environment Variables
 
@@ -298,7 +328,8 @@ make clean-all     # alias of clean
 ```
 
 Run `make help` for the same list with one-line descriptions. The runtime
-dependencies are `requests` and `prompt_toolkit` (declared in `pyproject.toml`);
+dependencies are `requests`, `prompt_toolkit` and `rich` (declared in
+`pyproject.toml`);
 everything else is the standard library. Dev tools live under the `dev` extra;
 there is no lock file, so pin exact versions with `==` if you need reproducible
 installs.
