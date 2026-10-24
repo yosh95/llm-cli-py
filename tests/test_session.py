@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from unittest.mock import patch
 
 import pytest
@@ -48,6 +50,19 @@ def test_tool_arguments_and_result_are_displayed(session, turn) -> None:
     assert "Executing tool: calc" in out
     assert "  [code] print(1)" in out
     assert "Tool Result" in out and "Exit code: 0" in out
+
+
+def test_a_slow_tool_reports_how_long_it_ran(session, turn) -> None:
+    """The tool's duration is on screen, so a slow tool is not mistaken for a hang."""
+
+    def slow(**_kwargs: object) -> ExecResult:
+        time.sleep(0.05)
+        return ExecResult(stdout="ok")
+
+    register(session.ctx.tool_registry, "slow", slow)
+    out = turn(tool_then_text(ToolCall(id="c1", name="slow", arguments={})))
+
+    assert re.search(r"\[Tool\] slow running\.\.\. \d+\.\ds", out)
 
 
 def test_unknown_tool_is_reported_to_the_model(session, turn) -> None:

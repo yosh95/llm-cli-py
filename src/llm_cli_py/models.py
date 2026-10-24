@@ -51,12 +51,19 @@ class Message:
         content: The message text (may be empty).
         tool_call_id: The tool call this message answers (``Role.TOOL`` only).
         tool_calls: Tool calls the assistant asked for (``Role.ASSISTANT`` only).
+        duration_ms: How long producing this message took -- the request that
+            returned it, or the tool run that answered a call. Recorded for the
+            log and never sent to the model: the request body is built field by
+            field (see ``LlmApiClient._build_messages``), so nothing extra can
+            leak onto the wire. ``None`` means nothing was measured (a user
+            turn, a system prompt, or a call that never reached a tool).
     """
 
     role: Role
     content: str
     tool_call_id: str | None = None
     tool_calls: list[ToolCallPayload] | None = None
+    duration_ms: float | None = None
 
 
 @dataclass

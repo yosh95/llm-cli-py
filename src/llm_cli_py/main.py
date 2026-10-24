@@ -33,6 +33,7 @@ from .session.transcript import ConversationLog
 from .sources import build_prompt
 from .tools import PYTHON_TOOL_DESCRIPTION, PYTHON_TOOL_SCHEMA, ToolRegistry, execute_python
 from .ui import display as ui_display
+from .utils.clock import Clock
 from .utils.fileio import UNUSABLE_PATH
 
 
@@ -158,6 +159,12 @@ def _configure_streams() -> None:
 def main() -> None:
     """Main entry point."""
     _configure_streams()
+    # The session starts here: stamps and durations are read from this clock from
+    # now on, so the uptime shown on every rule counts from this moment. The same
+    # clock measures requests and tool runs, which is what the log records, so
+    # the on-screen durations and the logged ones are the same numbers.
+    clock = Clock()
+    ui_display.configure_clock(clock)
 
     parser = build_parser()
     args = parser.parse_args()

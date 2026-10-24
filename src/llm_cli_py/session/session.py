@@ -9,14 +9,22 @@ from ..tools.registry import ToolRegistry
 from ..tools.types import ToolResult, normalise_tool_result
 
 
-def _append_tool_message(client: LlmClient, content: str, tool_call_id: str) -> None:
+def _append_tool_message(
+    client: LlmClient,
+    content: str,
+    tool_call_id: str,
+    duration_ms: float | None = None,
+) -> None:
     """Add a tool result to the conversation.
 
     Tool output is part of the record the model reasons over, exactly like a
     user or assistant message, so it is recorded through the client's
-    ``remember`` -- which is also what puts it in the log.
+    ``remember`` -- which is also what puts it in the log. ``duration_ms`` is the
+    tool run's own time, kept for the log beside the result it produced.
     """
-    client.remember(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
+    client.remember(
+        Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id, duration_ms=duration_ms)
+    )
 
 
 class SessionContext:
@@ -52,10 +60,13 @@ class ActiveSession:
             model = self.client.state.model
             display_model = model if model else "LLM"
             ui.display.print_rule()
-            ui.display.print_thinking(display_model)
 
+            # The request is the longest wait in a turn and the one with nothing
+            # to show for it: the status line ticks once a second while it is in
+            # flight, so a slow model and a hung one look different.
             try:
-                response = self.client.send(current_prompt, tool_schemas)
+                with ui.display.working(f"{display_model} is thinking..."):
+                    response = self.client.send(current_prompt, tool_schemas)
             except Exception as e:
                 ui.display.report_error(f"LLM request failed: {e}")
                 break
@@ -124,16 +135,22 @@ class ActiveSession:
 
             tool = self.ctx.tool_registry.get(tc.name)
             if tool is None:
+                # Nothing ran, so there is no duration to record.
                 message = f"Tool '{tc.name}' not found"
                 ui.display.report_error(message)
                 _append_tool_message(self.client, message, tc.id)
                 continue
 
+            # Tool code runs without a timeout, so the elapsed time is the only
+            # sign of whether it is working or spinning. The same timer is
+            # recorded with the result, so the log says how long it took even
+            # when the run failed.
             try:
-                result = tool.func(**tc.arguments)
+                with ui.display.working(f"[Tool] {tc.name} running...") as timer:
+                    result = tool.func(**tc.arguments)
             except Exception as e:
                 ui.display.report_error(f"Tool '{tc.name}' failed: {e}")
-                _append_tool_message(self.client, str(e), tc.id)
+                _append_tool_message(self.client, str(e), tc.id, timer.elapsed_ms())
                 continue
 
             # A tool that returned something other than ExecResult/ToolError is
@@ -141,4 +158,4 @@ class ActiveSession:
             # silently treating the value as a successful result.
             normalised: ToolResult = normalise_tool_result(result)
             ui.display.print_tool_result(normalised.as_display_lines())
-            _append_tool_message(self.client, normalised.as_tool_content(), tc.id)
+            _append_tool_message(self.client, normalised.as_tool_content(), tc.id, timer.elapsed_ms())
