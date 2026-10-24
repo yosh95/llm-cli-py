@@ -238,7 +238,17 @@ def print_assistant(text: str) -> None:
     body = text.strip()
     if _is_terminal():
         _console.print(Text("Assistant:", style="bold"))
-        _console.print(_wrapping_markdown(body))
+        # ``soft_wrap`` is off here, though the console itself has it on: with it,
+        # ``print`` tells the renderable not to wrap, and the Markdown elements
+        # that lay their own text out -- list items, block quotes -- measure their
+        # text, hand it to ``render_lines`` and crop each line at the width. The
+        # end of every long item is then dropped rather than moved to the next
+        # line, which is exactly what a Japanese answer shows first: a wide
+        # character takes two columns, so an item is over the width at half the
+        # character count a reader would guess. Wrapping normally also keeps
+        # Markdown's own alignment (table columns, hanging indents) intact, and
+        # ``crop=False`` is the backstop for a line that still cannot be folded.
+        _console.print(_wrapping_markdown(body), soft_wrap=False, crop=False)
         return
 
     _print(Text("Assistant:", style="bold"))

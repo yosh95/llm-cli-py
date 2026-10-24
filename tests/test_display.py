@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
 from llm_cli_py.tools.types import ExecResult, ToolError
@@ -282,13 +283,63 @@ def test_a_wide_table_wraps_its_cells_instead_of_truncating_them(width: int) -> 
 
 def test_a_wrapped_table_stays_inside_the_terminal_width() -> None:
     """No line is wider than the terminal, wide characters counted as two columns."""
-    from rich.cells import cell_len
-
     out = capture(terminal=True, width=60)
 
     display.print_assistant(WIDE_TABLE)
 
     assert max(cell_len(line) for line in out.text.splitlines()) <= 60
+
+
+@pytest.mark.parametrize("prefix", ["- ", "* ", "1. ", "> "])
+def test_a_long_item_wraps_instead_of_losing_its_end(prefix: str) -> None:
+    """Bullets, numbered items and quotes lay their own text out -- and must wrap.
+
+    These are the constructs that render through ``console.render_lines`` rather
+    than letting the console wrap their text, so they crop each line at the
+    console width unless the width they are given is honest. The console runs
+    with ``soft_wrap=True`` (a plain line is written as it arrived), and a
+    Markdown renderable inheriting that flag is read as "never wrap, never
+    crop": every long item then silently loses its end instead of continuing on
+    the next line. A Japanese item is over the width far sooner than its
+    character count suggests, which is when it shows.
+    """
+    item = prefix + "中国の開発者が2026年7月にGitHubで公開した、Go言語で書かれた" * 2 + "末尾です。"
+    out = capture(terminal=True, width=60)
+
+    display.print_assistant(item)
+
+    text = out.text
+    assert "\u2026" not in text  # nothing was cut
+    # The end of the item -- what cropping would have eaten -- is on the last line.
+    assert "末尾です。" in "".join(line.strip() for line in text.splitlines())
+    assert max(cell_len(line) for line in text.splitlines()) <= 60
+
+
+def test_a_long_paragraph_wraps_too() -> None:
+    """The same for a paragraph: the answer is never written past the width."""
+    out = capture(terminal=True, width=60)
+    paragraph = "本件の本質は「ゼロデイの新種マルウェア」ではなく、既存の手口を機械速度にしたこと。" * 3
+
+    display.print_assistant(paragraph)
+
+    text = out.text
+    assert max(cell_len(line) for line in text.splitlines()) <= 60
+    assert "".join(line.strip() for line in text.splitlines()).endswith("機械速度にしたこと。")
+
+
+def test_a_code_block_wraps_instead_of_losing_its_end() -> None:
+    """A fenced block wraps its long lines, so the tail of the code stays visible."""
+    out = capture(terminal=True, width=60)
+    code = "```python\nprint('" + "a" * 120 + "END')\n```\n"
+
+    display.print_assistant(code)
+
+    text = out.text
+    assert "\u2026" not in text
+    # Every line of the block is there, the last one included.
+    joined = "".join(line.strip() for line in text.splitlines())
+    assert "a" * 120 + "END" in joined
+    assert max(cell_len(line) for line in text.splitlines()) <= 60
 
 
 def test_a_table_is_not_rendered_at_all_in_a_file() -> None:
