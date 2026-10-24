@@ -295,7 +295,16 @@ def print_tool_call(name: str, arguments: dict[str, object]) -> None:
 
 
 def _print_code(code: str) -> None:
-    """Print a block of code, indented, highlighted on a terminal."""
+    """Print a block of code, indented, highlighted on a terminal.
+
+    A line longer than the terminal is wrapped onto the next one rather than cut
+    at the right edge. ``Syntax`` crops -- it does not wrap -- unless asked, so
+    the last thing on a long line is lost: the URL a script fetches, the
+    ``timeout=`` it passes, the closing bracket that shows where an expression
+    ended. Those are the details a reader of a transcript is scanning the code
+    for, and an agent's one-line ``sh("curl ...")`` is exactly the line that
+    runs off the edge.
+    """
     if not _is_terminal():
         for line in code.split("\n"):
             _print(Text(CODE_INDENT + line))
@@ -310,11 +319,15 @@ def _print_code(code: str) -> None:
         # so it should use the terminal's own colours for everything it does not
         # highlight.
         background_color="default",
-        word_wrap=False,
+        word_wrap=True,
         padding=0,
         indent_guides=False,
     )
-    _console.print(Padding(syntax, (0, 0, 0, len(CODE_INDENT))))
+    # ``soft_wrap`` is off here, as in :func:`print_assistant`, and for the same
+    # reason: with it the renderable is told never to wrap or crop, and a line
+    # that does not fit is cut instead of continued. ``crop=False`` is the
+    # backstop for a line that still cannot be folded.
+    _console.print(Padding(syntax, (0, 0, 0, len(CODE_INDENT))), soft_wrap=False, crop=False)
 
 
 def print_tool_result(result: ToolResult) -> None:

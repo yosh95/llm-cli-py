@@ -405,6 +405,32 @@ def test_code_is_highlighted_on_a_terminal_but_not_in_a_file(plain, terminal) ->
     assert "\x1b[" not in plain.raw
 
 
+def test_a_long_line_of_code_wraps_instead_of_losing_its_end() -> None:
+    """The end of a code line -- a URL, a ``timeout=`` -- stays readable.
+
+    ``Syntax`` crops, it does not wrap: a line wider than the terminal is cut at
+    the right edge, and what goes is the tail -- the URL an agent's one-line
+    ``sh("curl ...")`` fetches, the keyword argument that says how it waits.
+    That is the part worth reading, so the line continues on the next one.
+    """
+    code = (
+        "def sh(c):\n"
+        "    return subprocess.run(c, shell=True, capture_output=True, text=True)\n"
+        "\n"
+        "print(sh(\"curl -sk -m 20 'https://host/files/data/" + "x" * 40 + "/status.php'\"))\n"
+    )
+    out = capture(terminal=True, width=60)
+
+    display.print_tool_call("execute_python", {"code": code})
+
+    text = out.text
+    assert "\u2026" not in text  # nothing was cut
+    joined = "".join(line.strip() for line in text.splitlines())
+    assert "status.php'\"))" in joined
+    assert "capture_output=True, text=True)" in joined
+    assert max(cell_len(line) for line in text.splitlines()) <= 60
+
+
 @pytest.mark.usefixtures("clocks")
 def test_a_successful_result_reports_its_exit_code_and_output(plain) -> None:
     display.print_tool_result(ExecResult(stdout="done\n"))

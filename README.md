@@ -190,7 +190,9 @@ where it helps. In a terminal:
 - the assistant's answer is rendered as **Markdown** -- models write it, and
   headings, lists and fenced code read better as such;
 - code in a tool call is **syntax-highlighted**, so the Python an agent is about
-  to run looks like code;
+  to run looks like code -- and a line wider than the terminal continues on the
+  next one instead of being cut at the right edge, so the URL a script fetches
+  and the arguments after it stay readable;
 - a tool result is **coloured by outcome**: a green `Exit code: 0`, a red failed
   one, `[stdout]`/`[stderr]` as labels;
 - `NO_COLOR=1` turns the colours off (the usual convention, and `rich` honours
