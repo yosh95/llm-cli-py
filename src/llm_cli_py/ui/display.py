@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from rich.cells import cell_len
 from rich.console import Console
@@ -47,7 +47,8 @@ from rich.text import Text
 from ..utils.clock import Clock, Timer
 
 if TYPE_CHECKING:  # imported lazily at use: they are only needed for a terminal
-    from rich.console import RenderableType
+    from rich.console import ConsoleOptions, RenderableType, RenderResult
+    from rich.markdown import Markdown, MarkdownElement
 
     from ..tools.types import ToolResult
 
@@ -184,6 +185,46 @@ def print_rule() -> None:
     _print(line)
 
 
+def _wrapping_markdown(markup: str) -> Markdown:
+    """Build a Markdown renderable whose tables wrap their cells instead of cutting them.
+
+    ``rich``'s Markdown gives every table cell ``overflow="ellipsis"``, which is
+    the wrong failure mode for a transcript: a chatty model writes tables far
+    wider than any terminal, and the part that is cut is usually the part that
+    says what happened. Cells are set to ``"fold"`` -- wrap onto another line
+    within the column -- so the whole table is always readable.
+
+    Japanese makes this worse than it is in English, which is why it cannot be
+    left to chance: a wide character takes two columns, and a table of them is
+    over the width limit far sooner than the character count suggests.
+    ``fold`` breaks at the column edge, mid-word when it has to, which for
+    Japanese (no spaces to break at) is the only option anyway.
+    """
+    from rich.markdown import Markdown, TableElement
+    from rich.table import Table
+
+    class WrappingTableElement(TableElement):
+        """A table whose columns wrap their content."""
+
+        def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+            for renderable in super().__rich_console__(console, options):
+                if isinstance(renderable, Table):
+                    for column in renderable.columns:
+                        column.overflow = "fold"
+                        column.no_wrap = False
+                yield renderable
+
+    class WrappingMarkdown(Markdown):
+        """Markdown with the wrapping table in place of the truncating one."""
+
+        elements: ClassVar[dict[str, type[MarkdownElement]]] = {
+            **Markdown.elements,
+            "table_open": WrappingTableElement,
+        }
+
+    return WrappingMarkdown(markup)
+
+
 def print_assistant(text: str) -> None:
     """Display the assistant's final answer with a clear, borderless label.
 
@@ -196,10 +237,8 @@ def print_assistant(text: str) -> None:
     print_rule()
     body = text.strip()
     if _is_terminal():
-        from rich.markdown import Markdown
-
         _console.print(Text("Assistant:", style="bold"))
-        _console.print(Markdown(body))
+        _console.print(_wrapping_markdown(body))
         return
 
     _print(Text("Assistant:", style="bold"))

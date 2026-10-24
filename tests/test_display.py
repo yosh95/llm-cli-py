@@ -243,6 +243,65 @@ def test_an_answer_with_markup_characters_is_not_read_as_markup(plain) -> None:
     assert "see [INFO] and [/dim]" in plain.text
 
 
+# A table as a model really writes one for a Japanese answer: cells too wide for
+# any terminal, and wide characters (two columns each) making them wider still.
+# The full-width parentheses are the input being tested, not typos.
+# ruff: noqa: RUF001
+WIDE_TABLE = (
+    "| 発表日 | 事案 | 規模 |\n"
+    "|---|---|---|\n"
+    "| 10/23 | 佐川急便「お荷物問い合わせサービス」への不正アクセス "
+    "| 最大5,323万件（送り状の依頼主・届け先の氏名・住所・電話番号） |\n"
+    "| 10/21-23 | 日本経済新聞社への不正アクセス → 日経BP利用者情報にも波及 "
+    "| 日経 183万件、うち日経BP分 約80万件 |\n"
+)
+
+
+@pytest.mark.parametrize("width", [40, 60, 78, 120])
+def test_a_wide_table_wraps_its_cells_instead_of_truncating_them(width: int) -> None:
+    """Every cell stays readable, however narrow the terminal is.
+
+    ``rich``'s Markdown gives table cells ``overflow="ellipsis"``, so a table
+    wider than the terminal loses the ends of its cells -- usually the end that
+    says what happened. Japanese makes it bite sooner: a wide character takes two
+    columns, so a table of them is over the limit at half the character count.
+    """
+    out = capture(terminal=True, width=width)
+
+    display.print_assistant(WIDE_TABLE)
+
+    text = out.text
+    assert "\u2026" not in text  # nothing was cut
+    # The ends of the long cells -- the parts ellipsis would have eaten -- are
+    # still there; a wrap can split them across two lines, so the check is on the
+    # text with the layout removed.
+    joined = "".join(line.strip() for line in text.splitlines())
+    assert "電話番号)" in joined.replace("\uff09", ")")
+    assert "約80万件" in joined
+
+
+def test_a_wrapped_table_stays_inside_the_terminal_width() -> None:
+    """No line is wider than the terminal, wide characters counted as two columns."""
+    from rich.cells import cell_len
+
+    out = capture(terminal=True, width=60)
+
+    display.print_assistant(WIDE_TABLE)
+
+    assert max(cell_len(line) for line in out.text.splitlines()) <= 60
+
+
+def test_a_table_is_not_rendered_at_all_in_a_file() -> None:
+    """A redirected transcript keeps the Markdown source, table pipes and all."""
+    out = capture(terminal=False, width=60)
+
+    display.print_assistant(WIDE_TABLE)
+
+    assert "| 10/23 |" in out.text
+    assert "\u2026" not in out.text
+    assert "\u2500" not in out.text.split("Assistant:")[1]  # no table borders
+
+
 # ── Tool calls and results ────────────────────────────────────────
 
 
