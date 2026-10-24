@@ -1,10 +1,11 @@
 """Typed result classes for tool execution.
 
 A tool returns one of :class:`ExecResult` / :class:`ToolError`, and those two
-classes own both of the things the CLI does with such a value: ``as_tool_content``
-produces the JSON string recorded for the model, and ``as_display_lines``
-produces the human-readable transcript lines. There is no separate parse step:
-nothing re-reads the JSON the CLI itself produced.
+classes own what the CLI does with such a value for the model and for the
+transcript: ``as_tool_content`` produces the JSON string recorded for the model,
+``as_display_lines`` the plain-text lines of the transcript, and ``ok`` says
+whether the run succeeded -- which is what decides a colour in ``ui.display``,
+without this module needing to know that colours exist.
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ class ExecResult:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
+
+    @property
+    def ok(self) -> bool:
+        """Whether the code ran and exited zero."""
+        return self.exit_code == 0
 
     def to_dict(self) -> dict[str, object]:
         """Return this result as a JSON-serialisable payload."""
@@ -65,6 +71,11 @@ class ToolError:
     """
 
     error: str
+
+    @property
+    def ok(self) -> bool:
+        """A tool error is never a success."""
+        return False
 
     def to_dict(self) -> dict[str, str]:
         """Return this error as a JSON-serialisable payload."""

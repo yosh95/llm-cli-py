@@ -1,4 +1,11 @@
-"""Tests for the display's clock: line stamps, the rule's uptime, the live status line."""
+"""Tests for the display: line stamps, the rule's uptime, the status line, styling.
+
+What a terminal gets and what a file gets are deliberately different -- Markdown
+and syntax highlighting are for a person watching, plain text is for a reader --
+so each test says which one it exercises. Every test runs against a ``rich``
+console over an in-memory buffer, which is also what keeps them independent of
+pytest's capturing and of the terminal they happen to run in.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +13,15 @@ import io
 import re
 import time
 from datetime import datetime, timedelta
-from typing import TextIO
 
 import pytest
+from rich.console import Console
 
+from llm_cli_py.tools.types import ExecResult, ToolError
 from llm_cli_py.ui import display
 from llm_cli_py.utils.clock import Clock
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
 
 class Clocks:
@@ -43,12 +53,71 @@ class Clocks:
         return Clock(now=self.now, monotonic=self.tick)
 
 
+class Capture:
+    """The installed console, over a buffer, with two ways to read it."""
+
+    def __init__(self, *, terminal: bool, width: int = 100) -> None:
+        self.stream = io.StringIO()
+        display.configure_console(
+            Console(
+                file=self.stream,
+                width=width,
+                force_terminal=terminal,
+                soft_wrap=True,
+                markup=False,
+                highlight=False,
+                emoji=False,
+            )
+        )
+
+    @property
+    def raw(self) -> str:
+        """Exactly what was written, escape sequences included."""
+        return self.stream.getvalue()
+
+    @property
+    def text(self) -> str:
+        """What a person would see: the colour codes removed."""
+        return ANSI.sub("", self.raw)
+
+
+def capture(*, terminal: bool, width: int = 100) -> Capture:
+    """Install a console over a buffer of the given kind and width."""
+    return Capture(terminal=terminal, width=width)
+
+
+@pytest.fixture(autouse=True)
+def _restore_console(monkeypatch):
+    """Put the module's console back after each test.
+
+    ``capture()`` replaces a module-level object, which would otherwise follow a
+    test into the next one -- and a later test's output would vanish into this
+    one's buffer.
+    """
+    monkeypatch.setattr(display, "_console", display._console)
+
+
 @pytest.fixture
 def clocks(monkeypatch) -> Clocks:
     """Install a hand-driven clock: wall time 09:32:10, uptime 0.0 seconds."""
     clocks = Clocks()
     monkeypatch.setattr(display, "_clock", clocks.clock())
     return clocks
+
+
+@pytest.fixture
+def plain() -> Capture:
+    """Output as a redirected file gets it: no colour, no re-rendering."""
+    return capture(terminal=False)
+
+
+@pytest.fixture
+def terminal() -> Capture:
+    """Output as a terminal gets it: colour and rendering on."""
+    return capture(terminal=True)
+
+
+# ── Values ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -79,145 +148,270 @@ def test_the_wall_clock_is_read_per_line_not_once(clocks) -> None:
     assert (first, display.stamp()) == ("[09:32:10]", "[09:32:11]")
 
 
-def test_the_rule_carries_the_stamp_and_the_session_uptime(clocks, monkeypatch, capsys) -> None:
+# ── The rule ──────────────────────────────────────────────────────
+
+
+def test_the_rule_carries_the_stamp_and_the_session_uptime(clocks) -> None:
     """The rule doubles as the timeline: ``[HH:MM:SS] ──── [+HH:MM:SS]``."""
-    monkeypatch.setattr(display, "_term_width", lambda: 40)
+    out = capture(terminal=False, width=40)
     clocks.advance(3725)
 
     display.print_rule()
 
-    line = capsys.readouterr().out.rstrip("\n")
+    line = out.text.rstrip("\n")
     # The wall clock moved with the monotonic one, so the stamp shows the later
     # time while the uptime shows how long it has been since the session started.
     assert line.startswith("[10:34:15] \u2500")
     assert line.endswith(" [+01:02:05]")
-    assert display._display_width(line) == 40
+    assert len(line) == 40
 
 
 @pytest.mark.usefixtures("clocks")
-def test_the_rule_fills_the_terminal_exactly(monkeypatch, capsys) -> None:
+def test_the_rule_fills_the_terminal_exactly() -> None:
     """No wrapping: the rule's width is the terminal's, wide characters included."""
-    monkeypatch.setattr(display, "_term_width", lambda: 60)
+    out = capture(terminal=True, width=60)
 
     display.print_rule()
 
-    line = capsys.readouterr().out.rstrip("\n")
-    assert display._display_width(line) == 60
+    line = out.text.rstrip("\n")
+    assert len(line) == 60
     assert re.fullmatch(r"\[\d{2}:\d{2}:\d{2}\] \u2500+ \[\+\d{2}:\d{2}:\d{2}\]", line)
 
 
 @pytest.mark.usefixtures("clocks")
-def test_a_narrow_terminal_drops_the_uptime_rather_than_wrapping(monkeypatch, capsys) -> None:
+def test_a_narrow_terminal_drops_the_uptime_rather_than_wrapping() -> None:
     """A rule that wrapped onto a second line would be worse than one without the uptime."""
-    monkeypatch.setattr(display, "_term_width", lambda: 20)
+    out = capture(terminal=False, width=20)
 
     display.print_rule()
 
-    line = capsys.readouterr().out.rstrip("\n")
+    line = out.text.rstrip("\n")
     assert "+00:00:00" not in line
     assert line.startswith("[09:32:10] ") and set(line[11:]) == {"\u2500"}
-    assert display._display_width(line) == 20
+    assert len(line) == 20
+
+
+# ── Reports ───────────────────────────────────────────────────────
 
 
 @pytest.mark.usefixtures("clocks")
-def test_report_lines_are_stamped(capsys) -> None:
+def test_report_lines_are_stamped(plain) -> None:
     display.report_info("hello")
     display.report_error("boom")
 
-    assert capsys.readouterr().out == "[09:32:10] INFO: hello\n[09:32:10] [ERROR] boom\n"
+    assert plain.text == "[09:32:10] INFO: hello\n[09:32:10] [ERROR] boom\n"
 
 
 @pytest.mark.usefixtures("clocks")
-def test_a_tool_block_is_stamped(capsys) -> None:
-    display.print_tool_call("calc", ["  [code] 1+1"])
-    display.print_tool_result(["Exit code: 0"])
+def test_a_report_is_coloured_on_a_terminal_and_plain_in_a_file(terminal) -> None:
+    display.report_error("boom")
 
-    out = capsys.readouterr().out
-    assert "[09:32:10] [Tool] Executing tool: calc..." in out
-    assert "[09:32:10] Args:" in out
-    assert "[09:32:10]   Tool Result:" in out
+    assert "\x1b[" in terminal.raw  # the label is coloured
+    assert terminal.text == "[09:32:10] [ERROR] boom\n"
 
 
-class FakeTty(io.StringIO):
-    """A stream that claims to be a terminal, so the status line redraws in place."""
+# ── The assistant's answer ────────────────────────────────────────
 
-    def isatty(self) -> bool:
-        return True
+
+MARKDOWN_ANSWER = "# Title\n\n- one\n- two\n\n**bold**\n"
+
+
+def test_an_answer_is_rendered_as_markdown_on_a_terminal(terminal) -> None:
+    """Models write Markdown; a terminal shows it as such."""
+    display.print_assistant(MARKDOWN_ANSWER)
+
+    text = terminal.text
+    assert "Title" in text
+    assert "\u2022 one" in text  # Markdown's bullet, not the source's "- one"
+    assert "**bold**" not in text  # emphasis, not its source
+
+
+def test_an_answer_is_written_verbatim_to_a_file(plain) -> None:
+    """A redirected transcript is its own source: no bullets, no escapes."""
+    display.print_assistant(MARKDOWN_ANSWER)
+
+    assert "- one" in plain.text
+    assert "**bold**" in plain.text
+    assert "\u2022" not in plain.text
+    assert "\x1b[" not in plain.raw
+
+
+def test_an_answer_with_markup_characters_is_not_read_as_markup(plain) -> None:
+    """A model's or a tool's own words are literal: ``[INFO]`` is not a style tag."""
+    display.print_assistant("see [INFO] and [/dim]")
+
+    assert "see [INFO] and [/dim]" in plain.text
+
+
+# ── Tool calls and results ────────────────────────────────────────
 
 
 @pytest.mark.usefixtures("clocks")
-def test_working_prints_one_finished_line_when_not_a_terminal(capsys) -> None:
+def test_a_tool_block_is_stamped(plain) -> None:
+    display.print_tool_call("calc", {"code": "print(1)"})
+    display.print_tool_result(ExecResult(stdout="1\n"))
+
+    assert "[09:32:10] [Tool] Executing tool: calc..." in plain.text
+    assert "[09:32:10] Args:" in plain.text
+    assert "[09:32:10] Tool Result:" in plain.text
+
+
+def test_a_one_line_argument_stays_on_one_line(plain) -> None:
+    display.print_tool_call("calc", {"code": "1+1", "note": 7})  # type: ignore[dict-item]
+
+    lines = plain.text.splitlines()
+    assert "  [code] 1+1" in lines
+    assert "  [note] 7" in lines
+
+
+def test_a_multi_line_argument_keeps_its_own_indentation(plain) -> None:
+    """The code is reproduced as written, indented under a label of its own."""
+    code = "def f():\n    if True:\n        return 1"
+
+    display.print_tool_call("execute_python", {"code": code})
+
+    assert plain.text.splitlines()[3:] == [
+        "  [code]",
+        "    def f():",
+        "        if True:",
+        "            return 1",
+    ]
+
+
+def test_a_call_without_arguments_prints_no_args_block(plain) -> None:
+    display.print_tool_call("calc", {})
+
+    assert "Args:" not in plain.text
+
+
+def test_code_is_highlighted_on_a_terminal_but_not_in_a_file(plain, terminal) -> None:
+    """An agent showing the Python it is about to run should show it as code."""
+    code = "def f():\n    return 1"
+
+    display.print_tool_call("execute_python", {"code": code})
+
+    assert "\x1b[" in terminal.raw
+    assert "def f():" in terminal.text  # the code itself is unchanged
+    assert "\x1b[" not in plain.raw
+
+
+@pytest.mark.usefixtures("clocks")
+def test_a_successful_result_reports_its_exit_code_and_output(plain) -> None:
+    display.print_tool_result(ExecResult(stdout="done\n"))
+
+    assert plain.text.splitlines()[2:] == [
+        "    Exit code: 0",
+        "    [stdout]",
+        "      done",
+    ]
+
+
+def test_a_failed_result_is_red_on_a_terminal(terminal) -> None:
+    """The outcome is visible from the first line of the block, without reading it."""
+    display.print_tool_result(ExecResult(stderr="boom\n", exit_code=1))
+
+    assert "\x1b[1;31m" in terminal.raw or "\x1b[31m" in terminal.raw  # red
+    assert "Exit code: 1" in terminal.text
+
+
+def test_a_tool_error_result_is_red_too(terminal) -> None:
+    display.print_tool_result(ToolError(error="API limit exceeded"))
+
+    assert "31m" in terminal.raw  # red, whatever the extra attributes
+    assert "Error: API limit exceeded" in terminal.text
+
+
+# ── The status line ───────────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("clocks")
+def test_working_prints_one_finished_line_when_not_a_terminal(plain) -> None:
     """A redirected stream gets no frames, only the duration once the block is over."""
     with display.working("gpt-4o is thinking..."):
         pass
 
-    assert capsys.readouterr().out == "[09:32:10] gpt-4o is thinking... 0.0s\n"
+    assert plain.text.splitlines() == ["[09:32:10] gpt-4o is thinking... 0.0s"]
 
 
-def test_working_reports_the_block_s_duration(clocks, capsys) -> None:
+@pytest.mark.usefixtures("clocks")
+def test_working_reports_the_block_s_duration(clocks, plain) -> None:
     """The number is measured on the monotonic clock, and is readable afterwards."""
     with display.working("calc running...") as timer:
         clocks.advance(2.5)
 
     assert display.format_duration(timer.elapsed()) == "2.5s"
-    assert capsys.readouterr().out.endswith("calc running... 2.5s\n")
+    assert plain.text.splitlines()[-1].endswith("calc running... 2.5s")
 
 
-def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch) -> None:
-    """On a terminal the line is repainted with ``\\r`` and ends with one newline."""
-    monkeypatch.setattr(display, "STATUS_INTERVAL", 0.01)
-    stream = FakeTty()
+def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch, terminal) -> None:
+    """On a terminal the line is redrawn, and only the finished one is terminated."""
+    monkeypatch.setattr(display, "LIVE_REFRESH_PER_SECOND", 50)
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(display.sys, "stdout", stream)
-        with display.working("gpt-4o is thinking..."):
-            clocks.advance(2.0)
+    with display.working("gpt-4o is thinking..."):
+        clocks.advance(2.0)
+        time.sleep(0.1)
 
-    written = stream.getvalue()
-    assert written.startswith("\r[09:32:10] gpt-4o is thinking... 0.0s")
-    assert written.rstrip("\n").endswith("gpt-4o is thinking... 2.0s")
-    # Every frame is the same line redrawn, not a new line: the terminal keeps the
-    # last one, and only the final reading is terminated.
-    assert written.endswith("\n")
-    assert written.count("\n") == 1
+    # The frames overwrite each other; what remains visible is the last one, and it
+    # is the finished reading -- no spinner, since the run is over.
+    last = terminal.text.rstrip().splitlines()[-1]
+    assert last.endswith("[09:32:12] gpt-4o is thinking... 2.0s")
+    assert "\u2807" not in last and "\u2839" not in last  # no spinner on the finished line
+    assert "\r\x1b[2K" in terminal.raw  # each frame is erased before the next
+    assert "\x1b[?25l" in terminal.raw  # the cursor was hidden while it ran
+    assert "\x1b[?25h" in terminal.raw  # and shown again afterwards
+    # One line on the terminal: each frame starts where the previous one began, which
+    # is exactly what the "\r" + erase pairs above are for.
+    assert "\n" not in terminal.text.rstrip("\n")
 
 
-def test_the_status_line_keeps_ticking_while_the_block_runs(clocks, monkeypatch) -> None:
+@pytest.mark.usefixtures("terminal")
+def test_the_status_line_keeps_updating_while_the_block_runs(clocks, monkeypatch) -> None:
     """A counter that keeps moving is what tells a slow operation from a hung one."""
-    monkeypatch.setattr(display, "STATUS_INTERVAL", 0.01)
-    stream = FakeTty()
-    frames: list[str] = []
-    original_paint = display._paint
+    monkeypatch.setattr(display, "LIVE_REFRESH_PER_SECOND", 50)
+    seen: list[float] = []
+    real = display._working_line
 
-    def record(stream_: TextIO, text: str, painted: int) -> int:
-        frames.append(text)
-        return original_paint(stream_, text, painted)
+    def record(label: str, seconds: float, *, spinner: bool) -> object:
+        seen.append(seconds)
+        return real(label, seconds, spinner=spinner)
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(display.sys, "stdout", stream)
-        patched.setattr(display, "_paint", record)
-        with display.working("gpt-4o is thinking..."):
-            for _ in range(5):
-                clocks.advance(1.0)
-                time.sleep(0.02)  # let the ticker draw this reading
+    monkeypatch.setattr(display, "_working_line", record)
 
-    durations = [frame.rsplit(" ", 1)[-1] for frame in frames]
-    assert durations[-1] == "5.0s"
-    assert len(set(durations)) > 2  # the counter moved while the block ran
+    with display.working("gpt-4o is thinking..."):
+        for _ in range(5):
+            clocks.advance(1.0)
+            time.sleep(0.05)  # let a refresh happen at this reading
+
+    assert max(seen) >= 4.0
+    assert len(set(seen)) > 2  # the counter moved while the block ran
 
 
 @pytest.mark.usefixtures("clocks")
-def test_an_exception_leaves_the_status_line_closed() -> None:
+def test_an_exception_leaves_the_status_line_closed(terminal) -> None:
     """Whatever ended the block, the next output starts on a line of its own."""
-    stream = FakeTty()
+    with pytest.raises(RuntimeError), display.working("calc running..."):
+        msg = "boom"
+        raise RuntimeError(msg)
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(display.sys, "stdout", stream)
-        with pytest.raises(RuntimeError), display.working("calc running..."):
-            msg = "boom"
-            raise RuntimeError(msg)
+    assert terminal.text.splitlines()[-1].endswith("[09:32:10] calc running... 0.0s")
+    assert terminal.text.endswith("\n")
 
-    assert stream.getvalue().endswith("\n")
+
+def test_an_interrupted_block_still_shows_how_long_it_ran(clocks, monkeypatch, terminal) -> None:
+    """Ctrl+C ends the block too; the duration it reached is worth seeing."""
+
+    def interrupted(**_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(display, "LIVE_REFRESH_PER_SECOND", 50)
+    with pytest.raises(KeyboardInterrupt), display.working("calc running..."):
+        clocks.advance(3.0)
+        interrupted()
+
+    assert terminal.text.splitlines()[-1].endswith("calc running... 3.0s")
+
+
+# ── Wiring ────────────────────────────────────────────────────────
 
 
 def test_configure_clock_replaces_the_clock_read_at_import(monkeypatch) -> None:
@@ -230,30 +424,10 @@ def test_configure_clock_replaces_the_clock_read_at_import(monkeypatch) -> None:
     assert display.stamp() == "[09:32:10]"
 
 
-@pytest.mark.usefixtures("clocks")
-def test_the_ticker_stops_before_the_line_is_closed(monkeypatch) -> None:
-    """Once the block is over, no frame may land after the newline that closes the line."""
-    monkeypatch.setattr(display, "STATUS_INTERVAL", 0.01)
-    stream = FakeTty()
-    in_flight: list[int] = []
-    frames: list[int] = []
+def test_the_session_uses_the_one_clock_it_was_given(clocks) -> None:
+    """Stamps and durations come from the same clock, so they cannot disagree."""
+    timer = display._clock.timer()
+    clocks.advance(1.5)
 
-    real_paint = display._paint
-
-    def slow_paint(stream_: TextIO, text: str, painted: int) -> int:
-        in_flight.append(1)
-        try:
-            return real_paint(stream_, text, painted)
-        finally:
-            in_flight.pop()
-            frames.append(len(frames))
-
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(display.sys, "stdout", stream)
-        patched.setattr(display, "_paint", slow_paint)
-        with display.working("calc running..."):
-            time.sleep(0.05)
-
-    # Nothing was drawn after the line was closed: the trailing newline is last.
-    assert stream.getvalue().endswith("\n")
-    assert not in_flight
+    assert display.format_duration(timer.elapsed()) == "1.5s"
+    assert display.stamp() == "[09:32:11]"

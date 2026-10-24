@@ -107,34 +107,13 @@ class ActiveSession:
         """Return True if any tool call has unparseable (truncated) arguments."""
         return any(tc.parse_error is not None for tc in tool_calls)
 
-    @staticmethod
-    def _format_tool_arguments(arguments: dict[str, object]) -> list[str]:
-        """Format tool-call arguments as the indented lines shown under ``Args:``.
-
-        Short values stay on a single ``[name] value`` line so simple calls read
-        at a glance. Values that span several lines (``code`` being the obvious
-        case) get a ``[name]`` label of their own and are reproduced verbatim
-        underneath, so the code keeps the indentation it was written with
-        instead of being mangled into one long line.
-        """
-        lines: list[str] = []
-        for name, value in arguments.items():
-            text = value if isinstance(value, str) else str(value)
-            # Code is almost always written with a trailing newline; dropping it
-            # first keeps the block from ending on an empty indented line and
-            # lets one-line code stay on a single ``[name] value`` line.
-            value_lines = text.rstrip("\n").split("\n")
-            if len(value_lines) == 1:
-                lines.append(f"  [{name}] {value_lines[0]}")
-                continue
-            lines.append(f"  [{name}]")
-            lines.extend(f"    {line}" for line in value_lines)
-        return lines
-
     def _handle_tool_calls(self, tool_calls: list[ToolCall]) -> None:
         """Execute tool calls automatically (no user confirmation)."""
         for tc in tool_calls:
-            ui.display.print_tool_call(tc.name, self._format_tool_arguments(tc.arguments))
+            # The arguments go over as they arrived: laying them out is the
+            # display's job, and it lays them out differently for a terminal and
+            # for a file.
+            ui.display.print_tool_call(tc.name, tc.arguments)
 
             tool = self.ctx.tool_registry.get(tc.name)
             if tool is None:
@@ -160,5 +139,5 @@ class ActiveSession:
             # a programming error; normalise it into a ToolError instead of
             # silently treating the value as a successful result.
             normalised: ToolResult = normalise_tool_result(result)
-            ui.display.print_tool_result(normalised.as_display_lines())
+            ui.display.print_tool_result(normalised)
             _append_tool_message(self.client, normalised.as_tool_content(), tc.id, timer.elapsed_ms())
