@@ -6,21 +6,23 @@ one place, and the session itself (``ActiveSession``) owns everything about
 talking to the model.
 
 Input is read from the terminal using prompt_toolkit; there is no other way in
-(no stdin piping, no slash commands), and every line you type at the ``> ``
-prompt is a new turn. The prompt is a full prompt_toolkit session rather than a
-bare line reader, so the key bindings that come with it are available: the arrow
-keys (and Ctrl+R) walk back through earlier turns, Ctrl+X Ctrl+E opens the line
-in your editor (``$VISUAL`` / ``$EDITOR``) and sends what you save, and Ctrl+Z
-suspends the CLI where the platform has ``SIGTSTP`` to send (see
-``SUSPEND_SUPPORTED``). That history is the session's own; what the model sees is
-the conversation kept by ``ActiveSession``. It is kept in memory unless
-``LLM_CLI_PROMPT_HISTORY_FILE`` names a file, in which case it is read from and
-written to that file instead and therefore survives the run. A stray Ctrl+C at
-the prompt returns to it, with the half-typed line abandoned; end of input ends the session -- Ctrl+D on
-Linux/macOS and Ctrl+Z then Enter on Windows, where the terminal reports
-end-of-file instead. Closing the line those keys leave behind is
-prompt_toolkit's job: when a prompt aborts it moves the cursor below ``> `` and
-terminates that line itself, so the next output -- the rule of the following
+(no stdin piping), and every line you type at the ``> `` prompt is a new turn --
+with one exception, ``/raw``, which asks for the conversation to be shown again
+(see :func:`show_conversation_markdown`) and is not sent to the model. The
+prompt is a full prompt_toolkit session rather than a bare line reader, so the
+key bindings that come with it are available: the arrow keys (and Ctrl+R) walk
+back through earlier turns, Ctrl+X Ctrl+E opens the line in your editor
+(``$VISUAL`` / ``$EDITOR``) and sends what you save, and Ctrl+Z suspends the CLI
+where the platform has ``SIGTSTP`` to send (see ``SUSPEND_SUPPORTED``). That
+history is the session's own; what the model sees is the conversation kept by
+``ActiveSession``. It is kept in memory unless ``LLM_CLI_PROMPT_HISTORY_FILE``
+names a file, in which case it is read from and written to that file instead and
+therefore survives the run. A stray Ctrl+C at the prompt returns to it, with the
+half-typed line abandoned; end of input ends the session -- Ctrl+D on Linux/macOS
+and Ctrl+Z then Enter on Windows, where the terminal reports end-of-file
+instead. Closing the line those keys leave behind is prompt_toolkit's job: when
+a prompt aborts it moves the cursor below ``> `` and terminates that line
+itself, so the next output -- the rule of the following
 turn, or the shell prompt once the CLI exits -- already starts on a line of its
 own. Nothing is printed here to add to it.
 """
@@ -43,8 +45,18 @@ from .. import ui
 from ..consts import ENV_PROMPT_HISTORY_FILE
 from ..utils.fileio import clean_path
 from .session import ActiveSession
+from .transcript import render_markdown
 
 PROMPT_TEXT = "> "
+
+RAW_COMMAND = "/raw"
+"""The one command the prompt understands: show the conversation as Markdown.
+
+It exists for copying: ``rich`` renders the answers as they arrive, one block
+per turn with rules, stamps and a status line in between, and the rendered
+screen is not the Markdown a model wrote. Asking for the conversation again
+prints it whole, as text, so a terminal's selection is the conversation.
+"""
 
 DEFAULT_HISTORY_LIMIT = 1000
 """How many recent turns the prompt keeps for the arrow keys, at most."""
@@ -160,9 +172,48 @@ def read_prompt(prompt_session: PromptSession[str]) -> str:
     return prompt_session.prompt(PROMPT_TEXT)
 
 
+def is_raw_command(text: str) -> bool:
+    """Whether ``text`` is the ``/raw`` command rather than a turn to send.
+
+    Only the bare word counts: a line that merely starts with a slash is still
+    ordinary prompt text, and ``/raw`` with anything else on it is sent to the
+    model rather than being half-understood as a command. Case is not
+    significant, so ``/RAW`` works too.
+    """
+    return text.strip().casefold() == RAW_COMMAND
+
+
+def show_conversation_markdown(session: ActiveSession) -> None:
+    """Print the whole conversation as Markdown, exactly as it stands.
+
+    The text is the conversation itself -- the messages the model was sent --
+    rendered as Markdown sections (see
+    :func:`~llm_cli_py.session.transcript.render_markdown`) and written verbatim
+    by :func:`~llm_cli_py.ui.display.print_verbatim`, so nothing ``rich`` would
+    draw is applied: no Markdown re-rendering, no colour, no stamps. What is on
+    screen is what a paste elsewhere receives.
+
+    Nothing is recorded: showing the conversation is not a turn, so neither the
+    conversation nor the log file changes.
+    """
+    state = session.client.state
+    if not state.conversation:
+        ui.display.report_info("The conversation is empty.")
+        return
+
+    # A rule opens the block, so the text is visibly set apart from the prompt
+    # above it; the loop's own rule closes it. The block itself is unstamped:
+    # copying it should not pick up lines of the transcript's decoration.
+    ui.display.print_rule()
+    ui.display.print_verbatim(render_markdown(state))
+
+
 def handle_user_input(session: ActiveSession, text: str) -> None:
-    """Process one user message through the LLM."""
+    """Process one user message through the LLM, or run ``/raw``."""
     try:
+        if is_raw_command(text):
+            show_conversation_markdown(session)
+            return
         session.process_and_print(text)
     except Exception as e:
         ui.display.report_error(f"Failed to process input: {e}")
@@ -175,12 +226,17 @@ def run_interactive(
 ) -> None:
     """Run the chat session loop.
 
+    ``/raw`` typed at the prompt shows the conversation as plain Markdown
+    instead of sending a turn; every other line goes to the model as usual.
+
     Args:
         session: The active session to drive.
         initial_prompt: Optional prompt (from the command line) processed as the
             first turn, before the terminal prompt is shown. The session stays
             interactive afterwards -- there is no mode that answers once and
-            exits.
+            exits. It is read like a line typed at the prompt -- so ``/raw``
+            works there too, showing the conversation as it stands (only the
+            system prompt, at that point).
         prompt_session: Optional prompt_toolkit PromptSession to read input with.
     """
     # Ctrl+C while the command-line turn is running means the same thing here as

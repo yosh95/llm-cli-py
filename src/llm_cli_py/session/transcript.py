@@ -8,6 +8,10 @@ everything that had been recorded up to that point.
 The conversation is the one source of what is written: the log is
 :class:`ClientState.conversation` rendered as JSON, not a second record kept in
 parallel, so it cannot drift from what the model was sent.
+
+The same conversation has a second rendering, :func:`render_markdown`, which is
+what ``/raw`` shows in the terminal: the same messages, laid out as Markdown
+rather than as a document, for copying elsewhere.
 """
 
 from __future__ import annotations
@@ -87,6 +91,116 @@ def _totals(records: list[dict[str, object]]) -> dict[str, float]:
             continue
         totals[kind] = round(totals.get(kind, 0.0) + float(duration), 1)
     return totals
+
+
+# ── The same conversation as Markdown ──────────────────────────────
+
+_FENCE_CHAR = "`"
+
+
+def _longest_run(text: str, char: str) -> int:
+    """Return the length of the longest unbroken run of ``char`` in ``text``."""
+    longest = current = 0
+    for ch in text:
+        current = current + 1 if ch == char else 0
+        longest = max(longest, current)
+    return longest
+
+
+def _fenced(code: str, language: str = "") -> str:
+    """Fence ``code`` with more backticks than it contains.
+
+    A fence the length of the text's own longest run of backticks would be closed
+    by it: a tool result that itself prints a fenced block would end the block
+    early and spill the rest of the conversation into the document as prose.
+    """
+    fence = _FENCE_CHAR * max(3, _longest_run(code, _FENCE_CHAR) + 1)
+    return f"{fence}{language}\n{code}\n{fence}"
+
+
+def _json_block(text: str) -> str:
+    """Fence a JSON payload, indented, or fence the text as it is if it is not JSON.
+
+    Tool arguments and results are JSON strings on the wire, and indented they
+    are something a reader can check -- a call that was one long line becomes a
+    few short ones. A payload that does not parse (arguments the model sent
+    truncated) or that is not JSON at all (the text of a tool that could not be
+    found) is kept exactly as it arrived, and its block is left unlabelled
+    rather than claiming to be JSON it is not.
+    """
+    try:
+        return _fenced(json.dumps(json.loads(text), ensure_ascii=False, indent=2), "json")
+    except json.JSONDecodeError:
+        return _fenced(text)
+
+
+def _message_heading(message: Message) -> str:
+    """The section heading of one message: ``## assistant``, ``## tool (c1)``.
+
+    A tool message names the call it answers, which is how a result is matched to
+    the call above it once the two are read as text rather than as a structure.
+    """
+    if message.role is Role.TOOL and message.tool_call_id:
+        return f"## {message.role.value} ({message.tool_call_id})"
+    return f"## {message.role.value}"
+
+
+def _message_body(message: Message) -> str | None:
+    """The message's own text, or ``None`` when it has none.
+
+    Text is reproduced as it stands -- a model's answer is already Markdown, and
+    re-wrapping or escaping it would be editing what the model said. A tool
+    message is different: its content is the JSON string the model was sent, so
+    it goes into a code block, indented.
+    """
+    body = message.content.rstrip("\n")
+    if not body.strip():
+        return None
+    if message.role is Role.TOOL:
+        return _json_block(body)
+    return body
+
+
+def _tool_call_blocks(message: Message) -> list[str]:
+    """One block per tool call the assistant asked for, with its call id."""
+    blocks: list[str] = []
+    for call in message.tool_calls or []:
+        function = call["function"]
+        label = f"**Tool call:** `{function['name']}`"
+        if call["id"]:
+            label += f" (`{call['id']}`)"
+        arguments = function["arguments"]
+        if arguments.strip():
+            label += "\n\n" + _json_block(arguments)
+        blocks.append(label)
+    return blocks
+
+
+def _message_markdown(message: Message) -> str:
+    """Render one conversation message as a Markdown section."""
+    parts = [_message_heading(message)]
+    body = _message_body(message)
+    if body is not None:
+        parts.append(body)
+    parts.extend(_tool_call_blocks(message))
+    return "\n\n".join(parts)
+
+
+def render_markdown(state: ClientState) -> str:
+    """Render the conversation as plain Markdown, for copying out of the terminal.
+
+    :func:`render` is the machine-readable record; this is the human one. Every
+    message becomes a ``## role`` section holding its text verbatim (tool calls
+    and tool results as JSON code blocks), so what is pasted elsewhere is the
+    conversation the model was sent, laid out -- not a re-rendering of it: no
+    colour, no wrapping, no bullets that were not written by the model.
+
+    The document opens with a heading naming the model, so a transcript pasted
+    into a file or another chat still says which model produced it.
+    """
+    title = f"# Conversation ({state.model})" if state.model else "# Conversation"
+    sections = [title, *(_message_markdown(message) for message in state.conversation)]
+    return "\n\n".join(sections) + "\n"
 
 
 class ConversationLog:

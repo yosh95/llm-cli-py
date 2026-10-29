@@ -26,6 +26,9 @@ Python-execution tool.
 - **Readable output** — answers are rendered as Markdown, code in a tool call is
   syntax-highlighted, results are coloured by outcome: on a terminal only, so a
   redirected transcript stays plain text
+- **`/raw`** — type it at the prompt to print the whole conversation as plain
+  Markdown instead of the rendered transcript, so the answer can be copied out
+  of the terminal with its Markdown intact
 - **Few dependencies** — `requests`, `prompt_toolkit`, `rich`
 
 ## Install
@@ -97,10 +100,80 @@ Summarize this`. Read any file yourself with a shell
 substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
 `execute_python`.
 
-There are no slash commands and no stdin piping: input is read from the terminal
-by `prompt_toolkit` (a pipe is not a source of turns), and every line you type at
-the `> ` prompt is sent to the model as a new turn. A line starting with `/` is
+There is no stdin piping: input is read from the terminal by `prompt_toolkit` (a
+pipe is not a source of turns), and every line you type at the `> ` prompt is
+sent to the model as a new turn. The one exception is `/raw` (below), which
+shows the conversation again instead. Otherwise a line starting with `/` is
 ordinary prompt text, so nothing needs escaping.
+
+### `/raw`: the conversation as Markdown
+
+Type `/raw` at the prompt and the whole conversation — system prompt, your
+turns, the model's answers, every tool call and tool result — is printed again
+as plain Markdown, exactly as it stands:
+
+````text
+[09:32:10] ──────────────────────────────────────────────── [+00:03:21]
+# Conversation (gpt-4o)
+
+## system
+
+Answer in Japanese.
+
+## user
+
+この表をMarkdownでまとめて
+
+## assistant
+
+# 見出し
+
+- 箇条書き
+- **強調** と `コード`
+
+## assistant
+
+**Tool call:** `execute_python` (`call_1`)
+
+```json
+{
+  "code": "print(1)"
+}
+```
+
+## tool (call_1)
+
+```json
+{
+  "stdout": "1\n",
+  "stderr": "",
+  "exit_code": 0
+}
+```
+````
+
+It is there for copying. The answers above it were *rendered* — bullets drawn as
+`•`, code coloured, rules and status lines in between — and a screen full of
+rendering is not the Markdown the model wrote. `/raw` prints the conversation
+itself, unwrapped and unstyled, so selecting it and pasting it elsewhere gives
+you the Markdown, tables and fences included:
+
+- **No slash commands otherwise.** Only the bare word `/raw` is a command;
+  `/raw please`, `/rawx` or `raw` are prompt text and are sent to the model.
+- **No other change.** `/raw` is not a turn: nothing is sent, nothing is
+  recorded, and the `LLM_CLI_LOG_FILE` log is left exactly as it was.
+- **Long lines are not broken.** The text is written as it arrived and the
+  terminal folds what does not fit on one screen line, so a long paragraph is
+  still one line in the paste. (A terminal that wraps *and* re-indents what it
+  wrapped — some Windows consoles — will still show the fold, but the text
+  itself is untouched.)
+- **Tool payloads are JSON code blocks**, indented, and a tool message names the
+  call it answers (`## tool (call_1)`), so a call and its result can be matched
+  after the structure is gone. Arguments that did not parse are shown as they
+  arrived, fenced, rather than executed or rewritten.
+- **Not on the command line.** `llm-cli-py /raw` sends `/raw` to the model as a
+  prompt; the command belongs at the `> ` prompt. (A prompt given on the command
+  line is then shown by `/raw` like any other message.)
 
 The prompt is a full `prompt_toolkit` session, so its standard key bindings are
 there:

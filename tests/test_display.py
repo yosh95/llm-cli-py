@@ -353,6 +353,65 @@ def test_a_table_is_not_rendered_at_all_in_a_file() -> None:
     assert "\u2500" not in out.text.split("Assistant:")[1]  # no table borders
 
 
+# ── Verbatim text (``/raw``) ──────────────────────────────────────
+
+RAW_MARKDOWN = "# Title\n\n- one\n- two\n\n**bold**\n"
+
+
+def test_verbatim_text_is_written_exactly_as_it_is(capsys) -> None:
+    """The point of the text is that it can be copied: it arrives unchanged."""
+    display.print_verbatim(RAW_MARKDOWN)
+
+    assert capsys.readouterr().out == RAW_MARKDOWN
+
+
+@pytest.mark.parametrize("width", [40, 60, 120])
+def test_a_long_line_is_not_broken_by_the_console(capsys, monkeypatch, width: int) -> None:
+    """Wrapping is the terminal's job: it folds the line on screen only.
+
+    Rich wrapping the text instead would put newlines into it, and the Markdown
+    pasted elsewhere would no longer be the Markdown that was written.
+    """
+    monkeypatch.setenv("COLUMNS", str(width))
+    paragraph = "# Heading\n\n" + "a paragraph of prose " * 12 + "\n"
+
+    display.print_verbatim(paragraph)
+
+    assert capsys.readouterr().out == paragraph
+
+
+def test_verbatim_text_is_not_read_as_rich_markup_or_rendered_as_markdown(capsys) -> None:
+    """``[INFO]`` is text, and ``- one`` stays a hyphen: nothing is re-rendered."""
+    display.print_verbatim("[INFO] - one\n")
+
+    out = capsys.readouterr().out
+    assert out == "[INFO] - one\n"
+    assert "\u2022" not in out
+
+
+def test_verbatim_text_goes_to_stdout_not_to_the_transcript_console(plain, capsys) -> None:
+    """It is written where the session's own output goes, styled nowhere.
+
+    ``display.configure_console`` retargets the styled lines (a test's buffer, an
+    embedder's console). The verbatim text is not styled, and it follows
+    ``sys.stdout`` -- so ``/raw`` reaches a redirected file, pytest's capture,
+    and a terminal alike, and its Markdown is never re-rendered on the way.
+    """
+    display.print_verbatim("plain text\n")
+
+    captured = capsys.readouterr().out
+    assert captured == "plain text\n"
+    assert plain.text == ""
+
+
+def test_verbatim_text_gains_a_final_newline_only_when_it_needs_one(capsys) -> None:
+    """Whatever follows starts on a line of its own, and nothing more is added."""
+    display.print_verbatim("no newline")
+    display.print_verbatim("has one\n")
+
+    assert capsys.readouterr().out == "no newline\nhas one\n"
+
+
 # ── Tool calls and results ────────────────────────────────────────
 
 

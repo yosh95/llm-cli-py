@@ -1,8 +1,10 @@
-"""Tests for the optional conversation log (``LLM_CLI_LOG_FILE``).
+"""Tests for the conversation's two renderings: the log, and ``/raw``'s Markdown.
 
-These drive the real ``send`` path (only the HTTP transport is patched), because
-what is being tested is that the conversation the client records -- and nothing
-else -- is what lands in the file.
+Most of these drive the real ``send`` path (only the HTTP transport is patched),
+because what is being tested is that the conversation the client records -- and
+nothing else -- is what lands in the file. The Markdown tests at the end write
+the conversation by hand: what is being tested there is the layout, and the
+shapes it has to survive (tool calls, tool results, fences inside the text).
 """
 
 from __future__ import annotations
@@ -13,8 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
+from llm_cli_py.models import ClientState, Message, Role
 from llm_cli_py.session.session import ActiveSession, SessionContext
-from llm_cli_py.session.transcript import ConversationLog, message_record, render
+from llm_cli_py.session.transcript import ConversationLog, message_record, render, render_markdown
 from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult
 from tests.conftest import completion, make_client, register, tool_call
@@ -362,3 +365,129 @@ def test_the_request_duration_comes_from_the_client_s_own_timer() -> None:
         client.send("hello", [])
 
     assert client.state.conversation[-1].duration_ms == 1500.0
+
+
+# ── The same conversation as Markdown (what ``/raw`` shows) ────────
+
+
+def conversation(*messages: Message, model: str = "gpt-4o") -> ClientState:
+    """A state holding ``messages``, as the session would have recorded them."""
+    return ClientState(model=model, conversation=list(messages))
+
+
+def tool_call_payload(call_id: str, name: str, arguments: str) -> dict:
+    """One entry of a recorded assistant message's ``tool_calls``."""
+    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
+
+
+def test_the_markdown_holds_every_message_under_its_own_heading() -> None:
+    """The document reads as a transcript: one section per message, in order."""
+    state = conversation(
+        Message(role=Role.SYSTEM, content="be brief"),
+        Message(role=Role.USER, content="hello"),
+        Message(role=Role.ASSISTANT, content="hi"),
+    )
+
+    assert render_markdown(state) == (
+        "# Conversation (gpt-4o)\n\n## system\n\nbe brief\n\n## user\n\nhello\n\n## assistant\n\nhi\n"
+    )
+
+
+def test_a_model_s_own_markdown_is_reproduced_not_re_rendered() -> None:
+    """The text is what the model wrote: bullets, emphasis and fences untouched."""
+    answer = "# Title\n\n- one\n- two\n\n**bold** and `code`\n"
+
+    document = render_markdown(conversation(Message(role=Role.ASSISTANT, content=answer)))
+
+    assert answer.rstrip("\n") in document
+    assert "\u2022" not in document  # no rendered bullet
+    assert "\x1b[" not in document  # and no escape sequences
+
+
+def test_a_tool_call_and_its_result_are_linked_by_the_call_id() -> None:
+    """A call carries the id; the result's heading names the call it answers."""
+    state = conversation(
+        Message(
+            role=Role.ASSISTANT,
+            content="",
+            tool_calls=[tool_call_payload("c1", "execute_python", '{"code": "print(1)"}')],
+        ),
+        Message(role=Role.TOOL, content='{"stdout": "1\\n", "exit_code": 0}', tool_call_id="c1"),
+    )
+
+    document = render_markdown(state)
+
+    assert "**Tool call:** `execute_python` (`c1`)" in document
+    assert "## tool (c1)" in document
+    # The arguments and the result are JSON, and they are laid out as such.
+    assert '```json\n{\n  "code": "print(1)"\n}\n```' in document
+    assert '"stdout": "1\\n"' in document
+
+
+def test_a_message_with_no_text_does_not_leave_blank_sections() -> None:
+    """An assistant turn that only asked for a tool has no body, and no gap either."""
+    state = conversation(
+        Message(
+            role=Role.ASSISTANT,
+            content="",
+            tool_calls=[tool_call_payload("c1", "calc", "{}")],
+        ),
+        Message(role=Role.TOOL, content="", tool_call_id="c1"),
+    )
+
+    document = render_markdown(state)
+
+    assert "\n\n\n" not in document
+    assert document.endswith("## tool (c1)\n")
+
+
+def test_a_fence_in_the_text_cannot_close_the_block_it_is_in() -> None:
+    """Tool output that prints a fenced block gets a longer fence around it.
+
+    Otherwise the text's own ```` ``` ```` would end the block, and the rest of
+    the conversation -- the following sections included -- would be read as
+    prose that had escaped the code.
+    """
+    state = conversation(
+        Message(role=Role.TOOL, content="```\nprint('hi')\n```", tool_call_id="c1"),
+    )
+
+    document = render_markdown(state)
+
+    assert document.rstrip("\n").endswith("````")  # a four-backtick fence
+    assert "````\n```\nprint('hi')\n```\n````" in document
+
+
+def test_arguments_that_do_not_parse_are_shown_as_they_arrived() -> None:
+    """A truncated tool call is not executed -- but ``/raw`` still says what came.
+
+    The arguments are fenced, not indented as JSON: what the model sent is the
+    only thing there is, and re-writing it would be inventing a call.
+    """
+    state = conversation(
+        Message(
+            role=Role.ASSISTANT,
+            content="",
+            tool_calls=[tool_call_payload("c1", "execute_python", '{"code": "pri')],
+        ),
+    )
+
+    document = render_markdown(state)
+
+    assert '```\n{"code": "pri\n```' in document
+
+
+def test_text_that_is_not_json_is_fenced_without_claiming_to_be_json() -> None:
+    """An unknown tool's result is a sentence, not a payload."""
+    state = conversation(Message(role=Role.TOOL, content="Tool 'ghost' not found", tool_call_id="c1"))
+
+    document = render_markdown(state)
+
+    assert "```\nTool 'ghost' not found\n```" in document
+    assert "```json" not in document
+
+
+def test_the_document_names_the_model_it_came_from() -> None:
+    """Pasted into a file or another chat, the transcript still says who wrote it."""
+    assert render_markdown(conversation(model="qwen3")).startswith("# Conversation (qwen3)\n")
+    assert render_markdown(conversation(model="")).startswith("# Conversation\n")

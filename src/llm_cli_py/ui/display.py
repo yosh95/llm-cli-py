@@ -28,10 +28,16 @@ working, or is it stuck?* For that, an operation that blocks -- a request to the
 model, a tool run -- gets a status line (:func:`working`) with a spinner and the
 time elapsed so far. A counter that keeps moving is the whole proof that the
 process is alive.
+
+One thing here is deliberately not styled at all: :func:`print_verbatim` writes
+text that is meant to be copied out of the terminal -- ``/raw``'s Markdown -- so
+anything this module would add to it (a stamp, a label, a re-rendering of its
+Markdown) would end up in the paste.
 """
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, ClassVar
@@ -466,6 +472,44 @@ def working(label: str) -> Iterator[Timer]:
             # Only the flag: leaving the block redraws once more, and that redraw is
             # the finished line. Updating here as well would draw it twice.
             finished[0] = True
+
+
+# ── Verbatim text ──────────────────────────────────────────────────
+
+
+def print_verbatim(text: str) -> None:
+    """Write ``text`` to stdout exactly as it is, and let the terminal wrap it.
+
+    Text that is going to be copied elsewhere -- the conversation, as ``/raw``
+    shows it -- must not be re-rendered: no Markdown (bullets, emphasis, syntax
+    colour), no stamps, no indentation added, no newlines of our own. Copying the
+    screen is then copying the text.
+
+    So the console here is built for this one write rather than being the
+    transcript's: it writes plain text, with nothing to interpret and nothing to
+    highlight. Read at the time of the call, it also follows ``sys.stdout``
+    wherever that points -- the terminal, a redirected file -- which is where the
+    rest of the transcript goes too.
+
+    ``soft_wrap=True`` at the print call is what leaves the wrapping to the
+    terminal: a line too long for the terminal is folded on screen while the line
+    itself stays one line, so a paragraph is copied with its Markdown intact
+    instead of arriving broken where ``rich`` would have wrapped it. And nothing
+    is added to the text either -- its own trailing newline ends the block, and
+    one is supplied only when the caller's text has none, so that whatever is
+    printed next starts on a line of its own.
+    """
+    console = Console(
+        file=sys.stdout,
+        markup=False,
+        highlight=False,
+        emoji=False,
+        # The opposite of the transcript console's setting: text written through
+        # this one is a candidate for wrapping at all (see the docstring).
+        soft_wrap=False,
+    )
+    console.print(text, end="" if text.endswith("\n") else "\n", soft_wrap=True)
+    sys.stdout.flush()
 
 
 # ── Reports ────────────────────────────────────────────────────────

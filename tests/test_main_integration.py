@@ -271,3 +271,135 @@ def test_ctrl_c_during_the_first_turn_returns_to_the_prompt() -> None:
     interactive_mod.run_interactive(session, "first", prompt_session)  # type: ignore[arg-type]
 
     assert session.turns == 1
+
+
+# ── ``/raw``: the conversation, as Markdown, for copying ──────────
+
+
+def raw_session() -> tuple:
+    """A session holding a conversation, with a client that must not be asked.
+
+    ``send`` is replaced by something that fails the test if it is called:
+    ``/raw`` is not a turn, so the model must not hear about it.
+    """
+    from unittest.mock import MagicMock
+
+    from llm_cli_py.models import Message, Role
+    from llm_cli_py.session.session import ActiveSession, SessionContext
+    from llm_cli_py.tools.registry import ToolRegistry
+    from tests.conftest import make_client
+
+    client = make_client("gpt-4o", system_prompt="be brief")
+    client.remember(Message(role=Role.USER, content="**hello**"))
+    client.remember(Message(role=Role.ASSISTANT, content="hi"))
+    client.send = MagicMock(side_effect=AssertionError("/raw was sent to the model"))  # type: ignore[method-assign]
+    return ActiveSession(client, SessionContext(tool_registry=ToolRegistry())), client
+
+
+@pytest.mark.parametrize("typed", ["/raw", "  /raw  ", "/RAW"])
+def test_raw_shows_the_conversation_as_markdown_without_asking_the_model(typed: str, capsys) -> None:
+    """The command is not a turn: no request, and the conversation is printed."""
+    from llm_cli_py.session import interactive as interactive_mod
+
+    session, client = raw_session()
+
+    interactive_mod.handle_user_input(session, typed)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert "# Conversation (gpt-4o)" in out
+    assert "## system\n\nbe brief" in out
+    assert "## user\n\n**hello**" in out  # the model's Markdown, untouched
+    assert "## assistant\n\nhi" in out
+    assert "\x1b[" not in out  # nothing rendered
+    client.send.assert_not_called()
+    assert len(client.state.conversation) == 3  # and nothing recorded
+
+
+def test_raw_changes_neither_the_conversation_nor_the_log(tmp_path, capsys) -> None:
+    """Showing a conversation is not a change to it, so the file on disk stands.
+
+    The log is rewritten whenever a message is recorded; ``/raw`` records none,
+    so the file is left exactly as the last turn wrote it.
+    """
+    from llm_cli_py.session import interactive as interactive_mod
+    from llm_cli_py.session.transcript import ConversationLog
+
+    session, client = raw_session()
+    log_path = tmp_path / "log.json"
+    client.observe(ConversationLog(log_path))
+    log = ConversationLog(log_path)  # the same path, for a write that must not move it
+    log.save(client.state)
+    before = log_path.read_text(encoding="utf-8")
+
+    interactive_mod.handle_user_input(session, "/raw")  # type: ignore[arg-type]
+
+    assert "# Conversation (gpt-4o)" in capsys.readouterr().out
+    assert log_path.read_text(encoding="utf-8") == before
+
+
+def test_a_line_that_only_starts_with_raw_is_still_a_turn(capsys) -> None:
+    """Only the bare command is a command; anything else is prompt text."""
+    from llm_cli_py.session import interactive as interactive_mod
+
+    session, client = raw_session()
+    client.send.side_effect = None
+    client.send.return_value = MagicMock(text="ok", tool_calls=[])
+
+    with patch.object(session, "process_and_print") as process:
+        for typed in ("/raw please", "raw", "/rawx", "look at /raw"):
+            interactive_mod.handle_user_input(session, typed)  # type: ignore[arg-type]
+
+    assert [c.args[0] for c in process.call_args_list] == [
+        "/raw please",
+        "raw",
+        "/rawx",
+        "look at /raw",
+    ]
+    assert capsys.readouterr().out == ""
+
+
+def test_raw_with_nothing_to_show_says_so(capsys) -> None:
+    """An empty conversation is reported rather than printed as a bare heading."""
+    from llm_cli_py.session import interactive as interactive_mod
+    from llm_cli_py.session.session import ActiveSession, SessionContext
+    from llm_cli_py.tools.registry import ToolRegistry
+    from tests.conftest import make_client
+
+    session = ActiveSession(
+        make_client("gpt-4o"),  # no system prompt, so nothing has been recorded
+        SessionContext(tool_registry=ToolRegistry()),
+    )
+
+    interactive_mod.handle_user_input(session, "/raw")  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert "empty" in out
+    assert "# Conversation" not in out
+
+
+def test_raw_is_checked_before_the_turn_and_keeps_the_session_going(monkeypatch) -> None:
+    """At the prompt, the command is answered and the next line is read as usual.
+
+    The loop's own handling is ``handle_user_input``'s (replaced here to keep the
+    test to the loop): what matters is that a ``/raw`` line does not end it.
+    """
+    from llm_cli_py.session import interactive as interactive_mod
+
+    session, client = raw_session()
+    seen: list[str] = []
+    monkeypatch.setattr(
+        interactive_mod,
+        "handle_user_input",
+        lambda _session, text: seen.append(text),
+    )
+    prompt_session = MagicMock()
+    # One typed line after the command: the prompt is asked for it, so /raw did
+    # not end the loop.
+    prompt_session.prompt.side_effect = ["/raw", EOFError]
+
+    with patch.object(interactive_mod.ui.display, "print_rule"):
+        interactive_mod.run_interactive(session, prompt_session=prompt_session)  # type: ignore[arg-type]
+
+    assert seen == ["/raw"]
+    assert prompt_session.prompt.call_count == 2
+    client.send.assert_not_called()
