@@ -538,6 +538,27 @@ def test_working_reports_the_block_s_duration(clocks, plain) -> None:
     assert plain.text.splitlines()[-1].endswith("calc running... 2.5s")
 
 
+@pytest.mark.parametrize("terminal_output", [False, True])
+@pytest.mark.usefixtures("clocks")
+def test_the_status_line_starts_in_the_same_column_as_every_other_line(terminal_output) -> None:
+    """The stamp opens the status line too, so the transcript keeps one column.
+
+    Anything drawn to the left of the stamp -- an animation, say -- would push the
+    stamp to the right while the block ran, and back to the edge when it ended.
+    """
+    out = capture(terminal=terminal_output)
+
+    with display.working("gpt-4o is thinking..."):
+        pass
+
+    display.report_info("done")
+
+    status, info = out.text.rstrip().splitlines()[-2:]
+    assert status.startswith("[09:32:10] gpt-4o is thinking... ")
+    assert info.startswith("[09:32:10] INFO: done")
+    assert status.index("[09:32:10]") == info.index("[09:32:10]") == 0
+
+
 def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch, terminal) -> None:
     """On a terminal the line is redrawn, and only the finished one is terminated."""
     monkeypatch.setattr(display, "LIVE_REFRESH_PER_SECOND", 50)
@@ -546,11 +567,9 @@ def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch, terminal) -
         clocks.advance(2.0)
         time.sleep(0.1)
 
-    # The frames overwrite each other; what remains visible is the last one, and it
-    # is the finished reading -- no spinner, since the run is over.
+    # The frames overwrite each other; what remains visible is the last one.
     last = terminal.text.rstrip().splitlines()[-1]
     assert last.endswith("[09:32:12] gpt-4o is thinking... 2.0s")
-    assert "\u2807" not in last and "\u2839" not in last  # no spinner on the finished line
     assert "\r\x1b[2K" in terminal.raw  # each frame is erased before the next
     assert "\x1b[?25l" in terminal.raw  # the cursor was hidden while it ran
     assert "\x1b[?25h" in terminal.raw  # and shown again afterwards
@@ -566,9 +585,9 @@ def test_the_status_line_keeps_updating_while_the_block_runs(clocks, monkeypatch
     seen: list[float] = []
     real = display._working_line
 
-    def record(label: str, seconds: float, *, spinner: bool) -> object:
+    def record(label: str, seconds: float) -> object:
         seen.append(seconds)
-        return real(label, seconds, spinner=spinner)
+        return real(label, seconds)
 
     monkeypatch.setattr(display, "_working_line", record)
 

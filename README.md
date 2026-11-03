@@ -21,8 +21,8 @@ Python-execution tool.
   line in your editor, and Ctrl+Z suspends the CLI on Unix (where there is a
   `SIGTSTP` to send)
 - **Time on screen** — every line is stamped with the wall-clock time, every rule
-  carries the session's uptime, and a request or a tool run shows a spinner and
-  how long it has been running
+  carries the session's uptime, and a request or a tool run shows how long it has
+  been running
 - **Readable output** — answers are rendered as Markdown, code in a tool call is
   syntax-highlighted, results are coloured by outcome: on a terminal only, so a
   redirected transcript stays plain text
@@ -222,15 +222,15 @@ carries, at its right end, how long the session has been running:
 
 ```text
 [09:32:10] ──────────────────────────────────────────────── [+00:00:00]
-⠸ [09:32:10] gpt-4o is thinking... 0.0s
-⠼ [09:32:11] gpt-4o is thinking... 1.0s
-  [09:32:13] gpt-4o is thinking... 2.5s
+[09:32:10] gpt-4o is thinking... 0.0s
+[09:32:11] gpt-4o is thinking... 1.0s
+[09:32:13] gpt-4o is thinking... 2.5s
 [09:32:13] ──────────────────────────────────────────────── [+00:00:02]
 [09:32:13] [Tool] Executing tool: execute_python...
 [09:32:13] Args:
   [code] import time; time.sleep(3); print("done")
-⠙ [09:32:13] [Tool] execute_python running... 0.0s
-  [09:32:16] [Tool] execute_python running... 3.0s
+[09:32:13] [Tool] execute_python running... 0.0s
+[09:32:16] [Tool] execute_python running... 3.0s
 [09:32:16] ──────────────────────────────────────────────── [+00:00:05]
 [09:32:16] Tool Result:
     Exit code: 0
@@ -239,12 +239,15 @@ carries, at its right end, how long the session has been running:
 ```
 
 A request to the model and a tool run are the two places where the CLI can go
-quiet for a long time. Each shows a status line with a spinner and the time
-elapsed, redrawn in place ten times a second, and the last reading stays on
-screen -- spinner stopped, so a finished line is not mistaken for a running one
--- as the operation's duration. A counter that keeps moving is what tells a slow
-provider or a slow script apart from a stuck one; the stamps on the surrounding
-lines then say when it started and how long the gap really was.
+quiet for a long time. Each shows a status line with the time elapsed, redrawn in
+place ten times a second, and the last reading stays on screen as the operation's
+duration. A counter that keeps moving is what tells a slow provider or a slow
+script apart from a stuck one; the stamps on the surrounding lines then say when
+it started and how long the gap really was.
+
+The status line begins with its stamp, like every other line of the transcript:
+nothing sits to its left, so the running frames and the finished reading start in
+the same column as the rules, the labels and the answers around them.
 
 Durations are measured on a monotonic clock, so a system time adjustment during
 a long wait cannot produce a negative or absurd number. Stamps come from the wall

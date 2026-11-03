@@ -25,9 +25,10 @@ Two rules decide what a line looks like:
 
 Neither of those answers the question a long silence raises: *is this still
 working, or is it stuck?* For that, an operation that blocks -- a request to the
-model, a tool run -- gets a status line (:func:`working`) with a spinner and the
-time elapsed so far. A counter that keeps moving is the whole proof that the
-process is alive.
+model, a tool run -- gets a status line (:func:`working`) with the time elapsed
+so far, redrawn in place while it runs. A counter that keeps moving is the whole
+proof that the process is alive -- and the line starts at the stamp, in the
+column every other line of the transcript starts in.
 
 One thing here is deliberately not styled at all: :func:`print_verbatim` writes
 text that is meant to be copied out of the terminal -- ``/raw``'s Markdown -- so
@@ -46,8 +47,6 @@ from rich.cells import cell_len
 from rich.console import Console
 from rich.live import Live
 from rich.padding import Padding
-from rich.spinner import Spinner
-from rich.table import Table
 from rich.text import Text
 
 from ..utils.clock import Clock, Timer
@@ -375,8 +374,16 @@ def _result_line_style(line: str, ok: bool) -> str:
 # ── A live status line for a blocking operation ────────────────────
 
 
-def _status_text(label: str, seconds: float) -> Text:
-    """The text of a status line: ``[09:32:13] gpt-4o is thinking... 2.5s``."""
+def _working_line(label: str, seconds: float) -> Text:
+    """The status line of a running operation: ``[09:32:13] gpt-4o is thinking... 2.5s``.
+
+    The line starts at the stamp, in the same column as every other stamped line
+    of the transcript -- which is what the frames of one operation share, and what
+    the operation shares with the rules, the labels and the answers above and
+    below it. Nothing is drawn to the left of the stamp: an animation there would
+    push the stamp off that column while the block ran and back to the edge when
+    it ended, and would be the one part of the line with nothing to say.
+    """
     body = Text()
     body.append(stamp(), style="dim")
     body.append(" ")
@@ -386,36 +393,21 @@ def _status_text(label: str, seconds: float) -> Text:
     return body
 
 
-def _working_line(label: str, seconds: float, *, spinner: bool) -> Table:
-    """Assemble the status line, with or without the spinner that turns it."""
-    body = _status_text(label, seconds)
-
-    grid = Table.grid(padding=0)
-    grid.add_column(no_wrap=True)
-    grid.add_column(no_wrap=True)
-    # One column for the spinner and one for the text, with a blank of the same
-    # width standing in for the spinner once the run is over -- so the finished
-    # line begins where the spinning ones did, rather than jumping to the left.
-    grid.add_row(
-        Spinner("dots", style="yellow") if spinner else Text(" "),
-        Text(" ") + body,
-    )
-    return grid
-
-
 @contextmanager
 def working(label: str) -> Iterator[Timer]:
     """Announce a blocking operation and show how long it has been running.
 
-    Inside a terminal the line carries a spinner and redraws ten times a second,
-    so it reads as alive rather than as a number that happens to change::
+    Inside a terminal the line redraws ten times a second, so it reads as alive
+    rather than as a number that happens to change::
 
-        ⠹ [09:32:10] gpt-4o is thinking... 1.0s
-        ⠼ [09:32:13] gpt-4o is thinking... 3.2s
+        [09:32:10] gpt-4o is thinking... 0.0s
+        [09:32:13] gpt-4o is thinking... 3.2s
 
-    A counter that keeps moving (and a spinner that keeps turning) is what
-    distinguishes a slow provider from a hung one; the final reading stays on
-    screen, without the spinner, as the operation's duration.
+    A counter that keeps moving is what distinguishes a slow provider from a hung
+    one, and the line is drawn from the stamp -- the same leading column as every
+    other stamped line of the transcript -- so the ticking number never shifts the
+    stamp out of place. The final reading stays on screen as the operation's
+    duration.
 
     Anywhere else -- output redirected to a file, captured by a test -- nothing is
     written until the block ends, and then the same final line is printed once: a
@@ -436,21 +428,13 @@ def working(label: str) -> Iterator[Timer]:
         try:
             yield timer
         finally:
-            # No spinner, and no grid making room for one: a file wants the line
-            # itself and nothing else.
-            _print(_status_text(label, timer.elapsed()))
+            # A file gets the line itself and nothing else.
+            _print(_working_line(label, timer.elapsed()))
         return
 
-    finished = [False]
-
-    def render() -> Table:
-        """The line as it should look right now -- read at every refresh.
-
-        Live keeps calling this until it stops, including once more while it
-        stops, so the finished block must say so here: otherwise the last frame
-        drawn would have the spinner back on a run that is over.
-        """
-        return _working_line(label, timer.elapsed(), spinner=not finished[0])
+    def render() -> Text:
+        """The line as it should look right now -- read at every refresh."""
+        return _working_line(label, timer.elapsed())
 
     with Live(
         render(),
@@ -463,15 +447,10 @@ def working(label: str) -> Iterator[Timer]:
         # worse than not showing it.
         vertical_overflow="visible",
     ):
-        try:
-            yield timer
-        finally:
-            # Whatever ended the block -- the answer, an error, Ctrl+C -- the last
-            # frame must be the finished line, without the spinner, before the
-            # display is released back to the transcript.
-            # Only the flag: leaving the block redraws once more, and that redraw is
-            # the finished line. Updating here as well would draw it twice.
-            finished[0] = True
+        # Leaving the block draws the last frame -- the finished reading -- and
+        # ends the line, so there is nothing to restore here. Whatever ended the
+        # block -- the answer, an error, Ctrl+C -- the line is closed either way.
+        yield timer
 
 
 # ── Verbatim text ──────────────────────────────────────────────────
