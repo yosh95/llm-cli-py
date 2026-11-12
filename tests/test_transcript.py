@@ -10,6 +10,7 @@ shapes it has to survive (tool calls, tool results, fences inside the text).
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +18,13 @@ import pytest
 
 from llm_cli_py.models import ClientState, Message, Role
 from llm_cli_py.session.session import ActiveSession, SessionContext
-from llm_cli_py.session.transcript import ConversationLog, message_record, render, render_markdown
+from llm_cli_py.session.transcript import (
+    ConversationLog,
+    message_record,
+    render,
+    render_markdown,
+    session_record,
+)
 from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult
 from tests.conftest import completion, make_client, register, tool_call
@@ -29,6 +36,16 @@ SEND = "llm_cli_py.providers.llm_api.post_json"
 def read_log(path: Path) -> dict:
     """Read a log file the CLI wrote."""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_session(path: Path) -> dict:
+    """Read the session the current run wrote -- the last one in the file."""
+    return read_log(path)["sessions"][-1]
+
+
+def read_conversation(path: Path) -> list[dict]:
+    """Read the messages of the session the current run wrote."""
+    return read_session(path)["conversation"]
 
 
 def logged_session(tmp_path: Path) -> tuple[ActiveSession, Path]:
@@ -48,6 +65,50 @@ def test_without_the_env_var_no_log_is_written(monkeypatch) -> None:
     assert main_module._conversation_log_or_none() is None
 
 
+def test_startup_keeps_the_log_that_is_already_there(tmp_path, monkeypatch) -> None:
+    """The bug this layout exists for: starting the CLI used to empty the file."""
+    from llm_cli_py import main as main_module
+
+    log_path = tmp_path / "log.json"
+    earlier = ConversationLog(log_path)
+    earlier.prepare()
+    earlier.save(make_client("first", system_prompt="be brief").state)
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+
+    log = main_module._conversation_log_or_none()
+
+    assert log is not None
+    assert not log.disabled
+    assert [s["model"] for s in read_log(log_path)["sessions"]] == ["first"]
+
+
+def test_a_new_run_starts_from_its_own_system_prompt_only(tmp_path, monkeypatch) -> None:
+    """The log is a record, not the next run's context.
+
+    Reading a log back into ``ClientState`` would make a run's history depend on
+    whatever was logged last; instead the client is built from the system prompt
+    and nothing else, and the log is only ever written.
+    """
+    from llm_cli_py import main as main_module
+
+    log_path = tmp_path / "log.json"
+    earlier = ConversationLog(log_path)
+    earlier.prepare()
+    earlier.save(make_client("first", system_prompt="yesterday").state)
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+
+    log = main_module._conversation_log_or_none()
+    client = make_client("m", system_prompt="today")
+    assert log is not None
+    client.observe(log)
+    client.remember(Message(role=Role.USER, content="hello"))
+
+    assert [m.content for m in client.state.conversation] == ["today", "hello"]
+    sessions = read_log(log_path)["sessions"]
+    assert [s["model"] for s in sessions] == ["first", "m"]
+    assert [m["content"] for m in sessions[1]["conversation"]] == ["today", "hello"]
+
+
 def test_the_log_holds_the_whole_conversation(tmp_path) -> None:
     """User turns, assistant replies, tool calls and tool results all appear."""
     session, log_path = logged_session(tmp_path)
@@ -60,7 +121,7 @@ def test_the_log_holds_the_whole_conversation(tmp_path) -> None:
     with patch(SEND, side_effect=turns):
         session.process_and_print("compute this")
 
-    document = read_log(log_path)
+    document = read_session(log_path)
     assert document["model"] == "gpt-4o"
     assert [m["role"] for m in document["conversation"]] == [
         "system",
@@ -93,7 +154,7 @@ def test_the_log_is_written_as_the_run_goes_not_only_at_the_end(tmp_path) -> Non
     session, log_path = logged_session(tmp_path)
 
     def die(**_kwargs: object) -> ExecResult:
-        assert [m["role"] for m in read_log(log_path)["conversation"]] == [
+        assert [m["role"] for m in read_conversation(log_path)] == [
             "system",
             "user",
             "assistant",
@@ -108,7 +169,7 @@ def test_the_log_is_written_as_the_run_goes_not_only_at_the_end(tmp_path) -> Non
 
     # The interrupted turn is rolled back, and the file follows: the prompt
     # stays, the reply nobody could finish is gone.
-    assert [m["role"] for m in read_log(log_path)["conversation"]] == ["system", "user"]
+    assert [m["role"] for m in read_conversation(log_path)] == ["system", "user"]
 
 
 def test_a_discarded_turn_disappears_from_the_log(tmp_path) -> None:
@@ -119,7 +180,7 @@ def test_a_discarded_turn_disappears_from_the_log(tmp_path) -> None:
     with patch(SEND, return_value=turn):
         session.process_and_print("run it")
 
-    assert [m["role"] for m in read_log(log_path)["conversation"]] == ["system", "user"]
+    assert [m["role"] for m in read_conversation(log_path)] == ["system", "user"]
 
 
 def test_a_message_record_omits_the_fields_that_do_not_apply() -> None:
@@ -135,7 +196,7 @@ def test_a_log_in_a_missing_directory_is_created(tmp_path) -> None:
 
     log.save(make_client("m").state)
 
-    assert read_log(tmp_path / "runs" / "2026" / "log.json")["model"] == "m"
+    assert read_session(tmp_path / "runs" / "2026" / "log.json")["model"] == "m"
 
 
 def test_a_failed_write_leaves_the_previous_log_intact(tmp_path, monkeypatch, capsys) -> None:
@@ -150,19 +211,165 @@ def test_a_failed_write_leaves_the_previous_log_intact(tmp_path, monkeypatch, ca
     monkeypatch.setattr("llm_cli_py.session.transcript.render", explode)
     log.save(make_client("second").state)
 
-    assert read_log(tmp_path / "log.json")["model"] == "first"  # still readable
+    assert read_session(tmp_path / "log.json")["model"] == "first"  # still readable
     assert [p.name for p in tmp_path.iterdir()] == ["log.json"]  # no debris left
     assert "disk full" in capsys.readouterr().out
 
 
-def test_render_is_json_with_the_conversation_and_its_version() -> None:
-    """The document is self-describing: a version, the model, the messages."""
+def test_render_is_json_with_the_sessions_and_their_version() -> None:
+    """The document is self-describing: a version, and one entry per run."""
     client = make_client("m", system_prompt="be brief")
+    session = session_record(client.state)
 
-    document = json.loads(render(client.state))
+    document = json.loads(render([session]))
 
-    assert document["version"] >= 1
-    assert document["conversation"] == [{"role": "system", "content": "be brief"}]
+    assert document["version"] >= 3
+    assert document["sessions"] == [session]
+    assert session["conversation"] == [{"role": "system", "content": "be brief"}]
+
+
+def test_a_second_run_is_added_to_the_log_instead_of_replacing_it(tmp_path) -> None:
+    """The point of the file: starting the CLI again keeps the run before it.
+
+    Nothing is read back into the conversation -- what a run starts with is its
+    own system prompt -- so the earlier session is in the log only.
+    """
+    log_path = tmp_path / "log.json"
+
+    first = ConversationLog(log_path, started_at=datetime(2026, 11, 12, 9, 0))
+    first.prepare()
+    first_client = make_client("gpt-4o", system_prompt="be brief")
+    first_client.observe(first)
+    first_client.remember(Message(role=Role.USER, content="yesterday"))
+
+    second = ConversationLog(log_path, started_at=datetime(2026, 11, 13, 9, 0))
+    second.prepare()
+    second_client = make_client("qwen3", system_prompt="be brief")
+    second_client.observe(second)
+    second_client.remember(Message(role=Role.USER, content="today"))
+
+    sessions = read_log(log_path)["sessions"]
+    assert [s["model"] for s in sessions] == ["gpt-4o", "qwen3"]
+    assert [s["started_at"] for s in sessions] == ["2026-11-12T09:00:00", "2026-11-13T09:00:00"]
+    assert [m["content"] for m in sessions[0]["conversation"]] == ["be brief", "yesterday"]
+    assert [m["content"] for m in sessions[1]["conversation"]] == ["be brief", "today"]
+    # The run that picked the file up did not pick up its conversation.
+    assert [m.content for m in second_client.state.conversation] == ["be brief", "today"]
+
+
+def test_starting_up_does_not_wipe_a_log_that_is_already_there(tmp_path) -> None:
+    """``prepare`` reads the file; it creates one only when there is none."""
+    log_path = tmp_path / "log.json"
+    earlier = ConversationLog(log_path)
+    earlier.prepare()
+    earlier.save(make_client("first").state)
+    before = log_path.read_text(encoding="utf-8")
+
+    ConversationLog(log_path).prepare()
+
+    assert log_path.read_text(encoding="utf-8") == before
+    assert [s["model"] for s in read_log(log_path)["sessions"]] == ["first"]
+
+
+def test_the_third_run_keeps_the_two_before_it(tmp_path) -> None:
+    """Every run is added, not just the one immediately before it."""
+    log_path = tmp_path / "log.json"
+    for model in ("one", "two", "three"):
+        log = ConversationLog(log_path)
+        log.prepare()
+        log.save(make_client(model).state)
+
+    assert [s["model"] for s in read_log(log_path)["sessions"]] == ["one", "two", "three"]
+
+
+def test_a_log_from_an_older_version_keeps_its_session(tmp_path) -> None:
+    """A version 2 file -- one session at the top level -- is carried over.
+
+    Upgrading must not throw away the run that is already in the file; its start
+    was never recorded, which is what ``started_at`` null says.
+    """
+    log_path = tmp_path / "log.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "model": "gpt-4o",
+                "conversation": [{"role": "user", "content": "old run"}],
+                "durations_ms": {"llm": 10.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    log = ConversationLog(log_path)
+    log.prepare()
+    log.save(make_client("qwen3").state)
+
+    sessions = read_log(log_path)["sessions"]
+    assert [s["model"] for s in sessions] == ["gpt-4o", "qwen3"]
+    assert sessions[0]["started_at"] is None
+    assert sessions[0]["conversation"] == [{"role": "user", "content": "old run"}]
+    assert sessions[0]["durations_ms"] == {"llm": 10.0}
+
+
+def test_a_file_that_is_not_a_log_is_left_exactly_as_it_is(tmp_path, capsys) -> None:
+    """A log holding earlier runs is never overwritten blind.
+
+    Something else's file -- or one this version cannot read -- is reported, and
+    logging stops for the run; the bytes on disk stay as they were.
+    """
+    log_path = tmp_path / "log.json"
+    log_path.write_text("this is not JSON at all\n", encoding="utf-8")
+
+    log = ConversationLog(log_path)
+    log.prepare()
+    log.save(make_client("m").state)  # must not raise
+
+    assert log.disabled
+    assert log_path.read_text(encoding="utf-8") == "this is not JSON at all\n"
+    out = capsys.readouterr().out
+    assert "log" in out.lower()
+    assert "left as it is" in out
+
+
+def test_a_directory_named_as_the_log_is_reported_not_written_into(tmp_path, capsys) -> None:
+    """The path is checked at startup, not at the end of the first turn."""
+    log = ConversationLog(tmp_path)
+
+    log.prepare()
+
+    assert log.disabled
+    assert "directory" in capsys.readouterr().out
+
+
+def test_an_empty_file_is_taken_as_an_empty_log(tmp_path) -> None:
+    """A file touched by something else has no sessions yet, and can be used."""
+    log_path = tmp_path / "log.json"
+    log_path.write_text("", encoding="utf-8")
+
+    log = ConversationLog(log_path)
+    log.prepare()
+    log.save(make_client("m").state)
+
+    assert not log.disabled
+    assert [s["model"] for s in read_log(log_path)["sessions"]] == ["m"]
+
+
+def test_a_discarded_turn_rewrites_only_this_run_s_session(tmp_path) -> None:
+    """Earlier runs are carried through a rollback unchanged."""
+    log_path = tmp_path / "log.json"
+    earlier = ConversationLog(log_path)
+    earlier.prepare()
+    earlier.save(make_client("first").state)
+    session, _ = logged_session(tmp_path)  # a second log on the same path
+    turn = completion(tool_calls=[tool_call("c1", "execute_python", '{"code": "pri')])
+
+    with patch(SEND, return_value=turn):
+        session.process_and_print("run it")
+
+    sessions = read_log(log_path)["sessions"]
+    assert [s["model"] for s in sessions] == ["first", "gpt-4o"]
+    assert [m["role"] for m in sessions[1]["conversation"]] == ["system", "user"]
 
 
 def test_a_path_that_is_not_a_regular_file_is_written_to_directly() -> None:
@@ -193,7 +400,7 @@ def test_a_write_that_fails_mid_run_disables_the_log_without_failing_the_turn(
 
     log.save(make_client("third").state)  # and it stays quiet afterwards
     assert capsys.readouterr().out == ""
-    assert read_log(tmp_path / "log.json")["model"] == "first"  # still the last good write
+    assert read_session(tmp_path / "log.json")["model"] == "first"  # still the last good write
 
 
 def test_a_log_path_that_cannot_be_resolved_is_reported_not_raised(capsys, monkeypatch) -> None:
@@ -225,7 +432,7 @@ def test_a_path_with_spaces_is_used_as_it_is(tmp_path) -> None:
 
     log.save(make_client("m").state)
 
-    assert read_log(tmp_path / "My Logs" / "session 1.json")["model"] == "m"
+    assert read_session(tmp_path / "My Logs" / "session 1.json")["model"] == "m"
 
 
 @pytest.mark.parametrize("quote", ['"', "'"])
@@ -241,7 +448,7 @@ def test_quotes_a_windows_set_left_in_the_value_are_dropped(tmp_path, quote: str
     log.save(make_client("m").state)
 
     assert log.path == tmp_path / "My Logs" / "log.json"
-    assert read_log(tmp_path / "My Logs" / "log.json")["model"] == "m"
+    assert read_session(tmp_path / "My Logs" / "log.json")["model"] == "m"
 
 
 def test_the_log_path_is_resolved_before_anything_can_change_directory(tmp_path, monkeypatch) -> None:
@@ -270,13 +477,13 @@ def test_each_measured_message_carries_its_duration(tmp_path: Path) -> None:
     with patch(SEND, side_effect=turns):
         session.process_and_print("compute this")
 
-    conversation = read_log(log_path)["conversation"]
+    conversation = read_conversation(log_path)
     durations = {m["role"]: m.get("duration_ms") for m in conversation}
     assert durations["user"] is None  # nothing was measured to produce it
     assert isinstance(durations["assistant"], float)
     assert isinstance(durations["tool"], float)
 
-    totals = read_log(log_path)["durations_ms"]
+    totals = read_session(log_path)["durations_ms"]
     assert set(totals) == {"llm", "tool"}
     assert totals["tool"] == conversation[3]["duration_ms"]
 
@@ -288,8 +495,8 @@ def test_a_request_that_fails_leaves_no_half_measured_message(tmp_path: Path) ->
     with patch(SEND, side_effect=RuntimeError("boom")):
         session.process_and_print("hello")
 
-    assert [m["role"] for m in read_log(log_path)["conversation"]] == ["system", "user"]
-    assert "durations_ms" not in read_log(log_path)
+    assert [m["role"] for m in read_conversation(log_path)] == ["system", "user"]
+    assert "durations_ms" not in read_session(log_path)
 
 
 def test_a_failed_tool_still_records_how_long_it_ran(tmp_path: Path) -> None:
@@ -309,7 +516,7 @@ def test_a_failed_tool_still_records_how_long_it_ran(tmp_path: Path) -> None:
     with patch(SEND, side_effect=turns):
         session.process_and_print("run it")
 
-    tool_record = next(m for m in read_log(log_path)["conversation"] if m["role"] == "tool")
+    tool_record = next(m for m in read_conversation(log_path) if m["role"] == "tool")
     assert isinstance(tool_record["duration_ms"], float)
     assert "the API said no" in tool_record["content"]
 
@@ -341,12 +548,11 @@ def test_the_duration_is_recorded_but_never_sent_to_the_model(tmp_path: Path) ->
 
 
 def test_a_log_without_measured_messages_has_no_durations_section() -> None:
-    """Version 1 logs stay readable, and an unmeasured log is written as before."""
-    document = json.loads(render(make_client("m", system_prompt="be brief").state))
+    """An unmeasured session is written without the totals it has nothing for."""
+    session = session_record(make_client("m", system_prompt="be brief").state)
 
-    assert document["version"] == 2
-    assert "durations_ms" not in document
-    assert document["conversation"] == [{"role": "system", "content": "be brief"}]
+    assert "durations_ms" not in session
+    assert session["conversation"] == [{"role": "system", "content": "be brief"}]
 
 
 def test_the_request_duration_comes_from_the_client_s_own_timer() -> None:

@@ -17,19 +17,38 @@ rather than as a document, for copying elsewhere.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 
 from .. import ui
 from ..models import ClientState, Message, Role
 from ..utils.fileio import UNUSABLE_PATH, clean_path, write_text_atomically
 
-LOG_FORMAT_VERSION = 2
+LOG_FORMAT_VERSION = 3
 """Version of the log layout (bumped when the shape below changes).
+
+3 made the document cumulative: ``sessions`` holds one entry per run, so
+starting the CLI again adds a session instead of replacing the file.
 
 2 added ``duration_ms`` to messages that were produced by a measured operation
 (a request to the model, a tool run). Readers of version 1 keep working: the
 field is additive and absent when nothing was measured.
+
+1 and 2 were a single session at the top level (``model`` and ``conversation``
+beside ``version``). Those files are still read, and are written back as the
+first entry of ``sessions``, with ``started_at`` null -- that run's start was
+never recorded.
 """
+
+
+class LogUnreadableError(Exception):
+    """The file named by ``LLM_CLI_LOG_FILE`` is not a log that can be added to.
+
+    Raised while reading it. ``ConversationLog`` turns this into a disabled log
+    rather than an exception: the one thing that must not happen to a file
+    holding earlier runs is a blind overwrite.
+    """
 
 
 def message_record(message: Message) -> dict[str, object]:
@@ -50,22 +69,37 @@ def message_record(message: Message) -> dict[str, object]:
     return record
 
 
-def render(state: ClientState) -> str:
-    """Render the conversation as pretty-printed JSON, tool calls included.
+def session_record(state: ClientState, started_at: datetime | None = None) -> dict[str, object]:
+    """Return one run of the CLI as the entry it becomes in the log.
 
-    Pretty-printing (rather than one line per turn) is for the human who reads
-    the log afterwards: a tool call's arguments and result are what a failure is
-    usually diagnosed from, and they are only legible indented.
+    A session is the conversation that run recorded, its model, and when it
+    started -- enough for a reader to tell two runs apart in a file that holds
+    many. Pretty-printing (rather than one line per turn) is for the human who
+    reads the log afterwards: a tool call's arguments and result are what a
+    failure is usually diagnosed from, and they are only legible indented.
     """
     records = [message_record(message) for message in state.conversation]
-    document: dict[str, object] = {
-        "version": LOG_FORMAT_VERSION,
+    session: dict[str, object] = {
+        "started_at": started_at.isoformat(timespec="seconds") if started_at is not None else None,
         "model": state.model,
         "conversation": records,
     }
     totals = _totals(records)
     if totals:
-        document["durations_ms"] = totals
+        session["durations_ms"] = totals
+    return session
+
+
+def render(sessions: Iterable[dict[str, object]]) -> str:
+    """Render the sessions the log holds as one pretty-printed JSON document.
+
+    ``sessions`` is every entry read from the file followed by this run's own;
+    the document is written whole, so what is on disk is always a complete log.
+    """
+    document: dict[str, object] = {
+        "version": LOG_FORMAT_VERSION,
+        "sessions": list(sessions),
+    }
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -91,6 +125,56 @@ def _totals(records: list[dict[str, object]]) -> dict[str, float]:
             continue
         totals[kind] = round(totals.get(kind, 0.0) + float(duration), 1)
     return totals
+
+
+def _check_session(entry: object, index: int) -> dict[str, object]:
+    """Return ``entry`` if it is a session record, or say why it cannot be read.
+
+    A file that has been edited by hand, truncated by a full disk, or written by
+    something else must be reported rather than quietly replaced, so every entry
+    is checked before anything is written back beside it.
+    """
+    if not isinstance(entry, dict):
+        msg = f"sessions[{index}] is not an object"
+        raise LogUnreadableError(msg)
+    if not isinstance(entry.get("conversation"), list):
+        msg = f"sessions[{index}] has no conversation list"
+        raise LogUnreadableError(msg)
+    return entry
+
+
+def _sessions_from_document(document: object) -> list[dict[str, object]]:
+    """Return the sessions an older log holds, in the layout this version writes.
+
+    ``sessions`` is the current shape. A version 1 or 2 file holds one session at
+    the top level instead; it is carried over as the first entry, so upgrading
+    does not lose the run that was already there.
+    """
+    if not isinstance(document, dict):
+        msg = "the log is not a JSON object"
+        raise LogUnreadableError(msg)
+
+    if "sessions" in document:
+        sessions = document["sessions"]
+        if not isinstance(sessions, list):
+            msg = "'sessions' is not a list"
+            raise LogUnreadableError(msg)
+        return [_check_session(entry, index) for index, entry in enumerate(sessions)]
+
+    if "conversation" in document:
+        session = _check_session(
+            {
+                "started_at": None,
+                "model": document.get("model", ""),
+                "conversation": document["conversation"],
+                **({"durations_ms": document["durations_ms"]} if "durations_ms" in document else {}),
+            },
+            0,
+        )
+        return [session]
+
+    msg = "the log is neither a 'sessions' document nor a single session"
+    raise LogUnreadableError(msg)
 
 
 # ── The same conversation as Markdown ──────────────────────────────
@@ -189,7 +273,8 @@ def _message_markdown(message: Message) -> str:
 def render_markdown(state: ClientState) -> str:
     """Render the conversation as plain Markdown, for copying out of the terminal.
 
-    :func:`render` is the machine-readable record; this is the human one. Every
+    :func:`render` is the machine-readable record of the whole log; this is the
+    human one, of one run's conversation. Every
     message becomes a ``## role`` section holding its text verbatim (tool calls
     and tool results as JSON code blocks), so what is pasted elsewhere is the
     conversation the model was sent, laid out -- not a re-rendering of it: no
@@ -204,14 +289,27 @@ def render_markdown(state: ClientState) -> str:
 
 
 class ConversationLog:
-    r"""Rewrite the conversation into ``path`` whenever a message is recorded.
+    r"""Keep every run in ``path``, rewriting it whenever a message is recorded.
+
+    The file accumulates: each run is an entry in the document's ``sessions``
+    array, so starting the CLI again appends a session instead of replacing the
+    file. Earlier runs are read once, at startup, and written back unchanged
+    beside this run's own -- the log is where a past session is looked up
+    afterwards, not where the next one picks up its context (nothing read here
+    reaches the conversation; see :class:`~llm_cli_py.models.ClientState`).
 
     Rewriting, rather than appending, is what makes the file survive a run that
-    dies mid-turn: writing the whole conversation and then replacing the old file
+    dies mid-turn: writing the whole document and then replacing the old file
     with it means the log on disk is valid JSON at every instant -- either the
-    previous version or the current one, never a half-written turn. A
-    conversation is small (the CLI records no streaming output), so rewriting it
-    is not worth a more intricate format.
+    previous version or the current one, never a half-written turn. Appending
+    would also mean a killed run leaves a truncated last session behind. A log
+    is small (the CLI records no streaming output), so rewriting it is not worth
+    a more intricate format.
+
+    A file that is not a log -- edited by hand, truncated by something else,
+    written by another program -- is reported and left exactly as it is: a log
+    that holds earlier runs is never overwritten blind. Logging then stops for
+    the run, and the session carries on without it.
 
     The path is read the way the user wrote it (see :func:`clean_path`): quotes
     that a Windows ``set`` left in the value, surrounding blanks and a leading
@@ -229,32 +327,116 @@ class ConversationLog:
     written last stays on disk and stays readable.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, started_at: datetime | None = None) -> None:
         self.path = clean_path(path)
+        # The stamp that tells this run apart from the ones already in the file.
+        self.started_at = started_at if started_at is not None else datetime.now()
         self.disabled = False
+        # The sessions already on disk, read once (None until then).
+        self._earlier: list[dict[str, object]] | None = None
 
-    def save(self, state: ClientState) -> None:
-        """Write the conversation as it currently stands.
+    # ── Reading and writing ────────────────────────────────────────
 
-        Never raises: losing the log is not worth losing the session, so a
-        failure is reported once and logging stops. The previous contents of the
-        file are left untouched by a failed write (see
-        :func:`~llm_cli_py.utils.fileio.write_text_atomically`).
+    def _read_sessions(self) -> list[dict[str, object]]:
+        """Return the sessions ``path`` already holds, or ``[]`` if there is no log.
+
+        Raises:
+            LogUnreadableError: If the file exists and is not a log this version can
+                be added to. Its contents are not touched in that case.
         """
-        if self.disabled:
-            return
+        # A device or a FIFO is not a log, and reading one could block, so only a
+        # regular file is read -- but writing to one still happens (see _write),
+        # which is what keeps /dev/null a way to switch the log off.
+        if not self.path.is_file():
+            if self.path.is_dir():
+                msg = "is a directory"
+                raise LogUnreadableError(msg)
+            return []
 
         try:
-            text = render(state)
-            if self.path.exists() and not self.path.is_file():
-                with self.path.open("w", encoding="utf-8") as handle:
-                    handle.write(text)
-            else:
-                write_text_atomically(self.path, text)
+            text = self.path.read_text(encoding="utf-8")
+        except (OSError, ValueError) as e:
+            msg = f"cannot be read ({e})"
+            raise LogUnreadableError(msg) from e
+
+        if not text.strip():
+            return []
+
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError as e:
+            msg = f"is not valid JSON ({e})"
+            raise LogUnreadableError(msg) from e
+
+        return _sessions_from_document(document)
+
+    def _write(self, sessions: list[dict[str, object]]) -> None:
+        """Write ``sessions`` to ``path`` whole, atomically where it is a file."""
+        text = render(sessions)
+        if self.path.exists() and not self.path.is_file():
+            with self.path.open("w", encoding="utf-8") as handle:
+                handle.write(text)
+        else:
+            write_text_atomically(self.path, text)
+
+    def _earlier_sessions(self) -> list[dict[str, object]] | None:
+        """The sessions already on disk, read once; ``None`` if the log is unusable.
+
+        A failure is reported once, here, and turns logging off for the run --
+        the caller only has to check for ``None``.
+        """
+        if self.disabled:
+            return None
+        if self._earlier is None:
+            try:
+                self._earlier = self._read_sessions()
+            except LogUnreadableError as e:
+                self.disabled = True
+                ui.display.report_error(f"Could not use the conversation log {self.path}: {e}")
+                ui.display.report_info("Continuing without a log; the file is left as it is.")
+                return None
+        return self._earlier
+
+    def _save_sessions(self, sessions: list[dict[str, object]]) -> None:
+        """Write ``sessions``, or report why not and stop logging."""
+        try:
+            self._write(sessions)
         except UNUSABLE_PATH as e:
             self.disabled = True
             ui.display.report_error(f"Could not write the conversation log to {self.path}: {e}")
             ui.display.report_info("Continuing without a log; the session is unaffected.")
+
+    # ── What the CLI calls ─────────────────────────────────────────
+
+    def prepare(self) -> None:
+        """Read the log that is already there, and make sure it can be written.
+
+        Called once at startup: a path that cannot be read, or a file that is not
+        a log, says so now rather than at the end of the first turn. A path with
+        no file yet is created (and its directory with it) as a log with no
+        sessions -- this run's first message adds one -- so a path that cannot be
+        written is reported now too.
+
+        Never raises: a log that cannot be used is reported and switched off.
+        """
+        if self._earlier_sessions() is None:
+            return
+        if not self.path.exists():
+            self._save_sessions([])
+
+    def save(self, state: ClientState) -> None:
+        """Write this run's session as the conversation currently stands.
+
+        The sessions already in the file are written back beside it, unchanged,
+        so a previous run survives the restart. Never raises: losing the log is
+        not worth losing the session, so a failure is reported once and logging
+        stops. The previous contents of the file are left untouched by a failed
+        write (see :func:`~llm_cli_py.utils.fileio.write_text_atomically`).
+        """
+        previous = self._earlier_sessions()
+        if previous is None:
+            return
+        self._save_sessions([*previous, session_record(state, self.started_at)])
 
     def message_recorded(self, state: ClientState, _message: Message) -> None:
         """Write the conversation once a message has been recorded.

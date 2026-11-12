@@ -290,7 +290,7 @@ the answer the model wrote. Markup characters in a model's or a tool's own text
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
 | `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | File the prompt history is kept in, so the arrow keys recall earlier turns across runs. Unset (the default) keeps the history in memory for the current run only. |
-| `LLM_CLI_LOG_FILE` | File the whole conversation is logged to as JSON, tool calls and tool results included. Unset (the default) writes no log at all. |
+| `LLM_CLI_LOG_FILE` | File every conversation is logged to as JSON, tool calls and tool results included. Each run is added to it as a new session, so earlier runs survive a restart (they are never loaded back into the conversation). Unset (the default) writes no log at all. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
 
 ### Writing Paths in the Environment
@@ -318,28 +318,56 @@ log file nothing is logged. Neither stops the session.
 
 ### Logging the Conversation
 
-Set `LLM_CLI_LOG_FILE` and the whole conversation is written to that file as
-JSON -- user turns, assistant replies, tool calls (name and arguments) and tool
-results -- so a run can be read back afterwards:
+Set `LLM_CLI_LOG_FILE` and every conversation is written to that file as JSON --
+user turns, assistant replies, tool calls (name and arguments) and tool results
+-- so a run can be read back afterwards:
 
 ```bash
 LLM_CLI_LOG_FILE=~/.local/state/llm-cli/session.json llm-cli-py -m gpt-4o
 ```
 
-The file is rewritten as the conversation grows, so what is on disk is always the
-conversation as it stood, including after a run that ends badly: a request that
-fails, a tool that hangs, a `kill`, or a Ctrl+C halfway through a turn all leave
-everything recorded up to that point, as one parseable JSON document. (The
-exception is a turn that is deliberately *discarded* -- a tool call whose
-arguments did not parse, or an interrupted tool run -- which is rolled back out
-of the conversation, and out of the log with it, because that is what the model
-will be sent next.)
+The log accumulates. Each run is one entry in the document's `sessions` array,
+so starting the CLI again **adds a session instead of replacing the file**: every
+run you have ever logged with that path stays there, in order, with the stamp it
+started at:
+
+```json
+{
+  "version": 3,
+  "sessions": [
+    { "started_at": "2026-11-12T21:40:03", "model": "gpt-4o", "conversation": [...] },
+    { "started_at": "2026-11-13T09:12:45", "model": "gpt-4o", "conversation": [...] }
+  ]
+}
+```
+
+The sessions already in the file are read once at startup and written back
+unchanged beside the current one. Reading them is all that happens to them:
+**nothing from the log is loaded into the conversation**, so every run starts
+from its system prompt alone and the model never sees a previous session's
+context. The file is where a past run is looked up afterwards, not where the next
+one picks up.
+
+Because the file only grows, a long-lived path is worth a look now and then (or
+split by day: `LLM_CLI_LOG_FILE=~/logs/$(date +%F).json`, expanded by the shell).
+A version 1 or 2 file -- one session at the top level -- is still read, and its
+session is carried over as the first entry (`started_at` null: that run's start
+was never recorded).
+
+Within a session, the file is rewritten as the conversation grows, so what is on
+disk is always that session as it stood, including after a run that ends badly: a
+request that fails, a tool that hangs, a `kill`, or a Ctrl+C halfway through a
+turn all leave everything recorded up to that point, as one parseable JSON
+document. (The exception is a turn that is deliberately *discarded* -- a tool
+call whose arguments did not parse, or an interrupted tool run -- which is rolled
+back out of the conversation, and out of the log with it, because that is what
+the model will be sent next.)
 
 Each message that took time to produce carries that time as `duration_ms`: the
 `assistant` message the duration of the request that returned it, the `tool`
 message the duration of the tool run. They are the same numbers the status line
-showed. The document also totals them per kind, so a slow run can be accounted
-for without adding up every message:
+showed. A session also totals them per kind, so a slow run can be accounted for
+without adding up every message:
 
 ```json
 { "role": "assistant", "content": "", "tool_calls": [...], "duration_ms": 2502.6 },
@@ -349,14 +377,17 @@ for without adding up every message:
 ```
 
 User turns, the system prompt, and a call that never reached a tool carry no
-`duration_ms` -- nothing was measured for them -- and such a log has no
+`duration_ms` -- nothing was measured for them -- and such a session has no
 `durations_ms` either. The field lives in the log only: the request body is built
 field by field, so nothing the API does not know about can be sent to it.
 
 Writes are atomic (temporary file plus rename), so a reader never sees half a
 document. Unset `LLM_CLI_LOG_FILE` -- the default -- and nothing is written at
 all; `LLM_CLI_LOG_FILE=/dev/null` also turns it off. A path that cannot be
-written is reported at startup and the run continues without a log.
+written is reported at startup and the run continues without a log, and a file
+that is not a log at all (something else's, or one this version cannot read) is
+reported and **left exactly as it is**: a file holding earlier runs is never
+overwritten blind.
 
 ### Example: Web Search Without a Search Tool
 

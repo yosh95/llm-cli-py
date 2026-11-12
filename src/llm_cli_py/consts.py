@@ -29,12 +29,17 @@ When unset or empty, no system message is sent.
 """
 
 ENV_LOG_FILE = "LLM_CLI_LOG_FILE"
-"""Environment variable holding the file the conversation is written to.
+"""Environment variable holding the file conversations are written to.
 
 Unset (the default) means no log is kept at all. When set, the whole
 conversation -- user turns, assistant replies, tool calls and tool results -- is
 written there as JSON, and rewritten as it grows, so what is on disk is always
 the conversation as it stood.
+
+The file accumulates across runs: each run is one entry in its ``sessions``
+array, so starting the CLI again adds a session rather than replacing the file.
+Nothing in it is read back into the conversation, so a new run starts from its
+system prompt alone.
 """
 
 ENV_PROMPT_HISTORY_FILE = "LLM_CLI_PROMPT_HISTORY_FILE"

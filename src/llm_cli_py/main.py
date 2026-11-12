@@ -12,6 +12,7 @@ import argparse
 import contextlib
 import os
 import sys
+from datetime import datetime
 
 from prompt_toolkit import PromptSession
 
@@ -25,7 +26,6 @@ from .consts import (
     ENV_MODEL,
     ENV_SYSTEM_PROMPT,
 )
-from .models import ClientState
 from .providers.llm_api import LlmApiClient
 from .session.interactive import make_prompt_session, run_interactive
 from .session.session import ActiveSession, SessionContext
@@ -101,21 +101,22 @@ def _prompt_session_or_none() -> PromptSession[str] | None:
 def _conversation_log_or_none() -> ConversationLog | None:
     """Build the log named by ``LLM_CLI_LOG_FILE``, or ``None`` when unset.
 
-    Unset is the default and means no file is written at all. When set, the file
-    is touched once here, so a path that cannot be written says so at startup
-    rather than at the end of the first turn; the log then disables itself and
-    the run continues without it.
+    Unset is the default and means no file is written at all. When set, the log
+    that is already there is read once here, so a path that cannot be read or
+    written says so at startup rather than at the end of the first turn; the log
+    then disables itself and the run continues without it.
+
+    Reading it is all that happens to it: the sessions already in the file are
+    carried into what this run writes, and nothing of them reaches the
+    conversation -- this run starts from its system prompt alone.
     """
     configured = os.environ.get(ENV_LOG_FILE, "").strip()
     if not configured:
         return None
 
     try:
-        log = ConversationLog(configured)
-        # An empty conversation with no model: this creates the file (and its
-        # directory), so a path that cannot be written says so now rather than
-        # at the end of the first turn.
-        log.save(ClientState())
+        log = ConversationLog(configured, started_at=datetime.now())
+        log.prepare()
     except UNUSABLE_PATH as e:
         ui_display.report_error(f"Could not use the conversation log {configured!r}: {e}")
         ui_display.report_info("Continuing without a log.")
@@ -210,9 +211,10 @@ def main() -> None:
         tool_registry=tool_registry,
     )
     # ── Optional conversation log ──────────────────────────────────
-    # Unset LLM_CLI_LOG_FILE means no file; when set, the conversation is
-    # rewritten there as it grows, tool calls included, so an interrupted run
-    # still leaves what had been recorded.
+    # Unset LLM_CLI_LOG_FILE means no file; when set, this run's conversation is
+    # added to it as a new session and rewritten there as it grows, tool calls
+    # included, so an interrupted run still leaves what had been recorded and
+    # the sessions already in the file keep standing beside it.
     log = _conversation_log_or_none()
     if log is not None:
         client.observe(log)
