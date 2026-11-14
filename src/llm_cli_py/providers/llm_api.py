@@ -28,10 +28,9 @@ class LlmApiClient(LlmClient):
         api_key: str | None = None,
         timeout: int = DEFAULT_REQUEST_TIMEOUT,
         *,
-        system_prompt: str = "",
         timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
-        super().__init__(model, system_prompt=system_prompt, timer_factory=timer_factory)
+        super().__init__(model, timer_factory=timer_factory)
         # The one endpoint this client talks to is fixed at construction, so the
         # base URL is never needed again (and a trailing "/" is harmless).
         self._endpoint = api_url.rstrip("/") + "/chat/completions"
@@ -46,9 +45,6 @@ class LlmApiClient(LlmClient):
         """
         messages: list[dict[str, object]] = []
 
-        # The system prompt is seeded into the conversation at client
-        # initialization (see LlmClient.__init__) and simply replayed here
-        # with the rest of the history.
         for msg in self._state.conversation:
             entry: dict[str, object] = {"role": msg.role.value}
 

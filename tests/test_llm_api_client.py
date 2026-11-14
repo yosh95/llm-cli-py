@@ -32,15 +32,19 @@ def test_request_targets_chat_completions_with_the_prompt_and_tools() -> None:
     assert result.text == "Answer"
 
 
-def test_the_system_prompt_is_seeded_as_the_first_message() -> None:
-    client = make_client(system_prompt="You are a test assistant.")
-    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion("ok")) as post:
-        client.send("hello", [])
+def test_the_conversation_starts_empty_so_nothing_is_sent_ahead_of_the_turn() -> None:
+    """The CLI sends no system message: the first request carries the user turn alone."""
+    client = make_client()
 
-    assert post.call_args.args[1]["messages"][0] == {
-        "role": "system",
-        "content": "You are a test assistant.",
-    }
+    assert client.state.conversation == []
+
+    with patch("llm_cli_py.providers.llm_api.post_json", return_value=completion("ok")) as post:
+        first = client.send("hello", [])
+
+    message = client.state.conversation[0]
+    assert (message.role.value, message.content) == ("user", "hello")
+    assert post.call_args.args[1]["messages"] == [{"role": "user", "content": "hello"}]
+    assert first.text == "ok"
 
 
 def test_the_answer_is_recorded_in_the_conversation() -> None:

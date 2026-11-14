@@ -104,10 +104,16 @@ def render(sessions: Iterable[dict[str, object]]) -> str:
 
 
 _DURATION_LABELS = {
-    Role.ASSISTANT: "llm",
-    Role.TOOL: "tool",
+    Role.ASSISTANT.value: "llm",
+    Role.TOOL.value: "tool",
 }
-"""Which bucket a measured message's time belongs to: the model's or a tool's."""
+"""Which bucket a measured message's time belongs to: the model's or a tool's.
+
+Keyed by the role's wire name rather than by ``Role``, because a record read from
+a log written by an earlier version may name a role this version does not have
+(a ``system`` entry, from when the CLI still sent one): such a record is simply
+not one of the buckets, instead of failing to be looked up.
+"""
 
 
 def _totals(records: list[dict[str, object]]) -> dict[str, float]:
@@ -119,7 +125,7 @@ def _totals(records: list[dict[str, object]]) -> dict[str, float]:
     """
     totals: dict[str, float] = {}
     for record in records:
-        kind = _DURATION_LABELS.get(Role(str(record["role"])))
+        kind = _DURATION_LABELS.get(str(record["role"]))
         duration = record.get("duration_ms")
         if kind is None or not isinstance(duration, (int, float)):
             continue

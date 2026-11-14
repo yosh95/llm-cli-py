@@ -11,9 +11,9 @@ Python-execution tool.
   (OpenAI, local servers, …)
 - **Python execution** — one built-in tool, `execute_python`, which everything
   else (web search, file work, data analysis, …) is built on
-- **No provider lock-in** — capabilities are described in `LLM_CLI_SYSTEM_PROMPT`,
-  so the agent calls APIs itself via `execute_python`; switch providers by
-  editing an env var
+- **No provider lock-in** — capabilities are described in the prompt, so the
+  agent calls APIs itself via `execute_python`; switch providers by editing an
+  env var
 - **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn
   per line, kept open until you end it (Ctrl+D); a prompt on the command line is
   answered first, then the same prompt continues. `prompt_toolkit`'s own key
@@ -108,17 +108,13 @@ ordinary prompt text, so nothing needs escaping.
 
 ### `/raw`: the conversation as Markdown
 
-Type `/raw` at the prompt and the whole conversation — system prompt, your
-turns, the model's answers, every tool call and tool result — is printed again
-as plain Markdown, exactly as it stands:
+Type `/raw` at the prompt and the whole conversation — your turns, the model's
+answers, every tool call and tool result — is printed again as plain Markdown,
+exactly as it stands:
 
 ````text
 [09:32:10] ──────────────────────────────────────────────── [+00:03:21]
 # Conversation (gpt-4o)
-
-## system
-
-Answer in Japanese.
 
 ## user
 
@@ -288,10 +284,13 @@ the answer the model wrote. Markup characters in a model's or a tool's own text
 | `LLM_CLI_API_URL` | Base URL of the OpenAI-compatible API. Required (e.g. `http://localhost:11434/v1`); can be given with `--api-url`. |
 | `LLM_CLI_API_KEY` | API key (optional for local instances). Overridden by `--api-key`. |
 | `LLM_CLI_MODEL` | Default model. Overridden by `-m`. |
-| `LLM_CLI_SYSTEM_PROMPT` | System prompt, read once at startup and seeded as the first message. When unset, none is sent. It can also describe extra capabilities (e.g. a search endpoint and the env var holding its key) that the agent calls via `execute_python`. |
 | `LLM_CLI_PROMPT_HISTORY_FILE` | File the prompt history is kept in, so the arrow keys recall earlier turns across runs. Unset (the default) keeps the history in memory for the current run only. |
 | `LLM_CLI_LOG_FILE` | File every conversation is logged to as JSON, tool calls and tool results included. Each run is added to it as a new session, so earlier runs survive a restart (they are never loaded back into the conversation). Unset (the default) writes no log at all. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
+
+There is no system prompt: the CLI sends no system message, so the first request
+of a run carries the user's own turn and nothing before it. Anything the agent
+needs to know is written into the prompt itself (`-s` / positional arguments).
 
 ### Writing Paths in the Environment
 
@@ -344,9 +343,8 @@ started at:
 The sessions already in the file are read once at startup and written back
 unchanged beside the current one. Reading them is all that happens to them:
 **nothing from the log is loaded into the conversation**, so every run starts
-from its system prompt alone and the model never sees a previous session's
-context. The file is where a past run is looked up afterwards, not where the next
-one picks up.
+empty and the model never sees a previous session's context. The file is where a
+past run is looked up afterwards, not where the next one picks up.
 
 Because the file only grows, a long-lived path is worth a look now and then (or
 split by day: `LLM_CLI_LOG_FILE=~/logs/$(date +%F).json`, expanded by the shell).
@@ -376,8 +374,8 @@ without adding up every message:
 "durations_ms": { "llm": 3505.0, "tool": 3012.2 }
 ```
 
-User turns, the system prompt, and a call that never reached a tool carry no
-`duration_ms` -- nothing was measured for them -- and such a session has no
+User turns, and a call that never reached a tool carry no `duration_ms` --
+nothing was measured for them -- and such a session has no
 `durations_ms` either. The field lives in the log only: the request body is built
 field by field, so nothing the API does not know about can be sent to it.
 
@@ -391,11 +389,12 @@ overwritten blind.
 
 ### Example: Web Search Without a Search Tool
 
-Describe the API in `LLM_CLI_SYSTEM_PROMPT` and the agent calls it itself:
+Describe the API in the prompt itself and the agent calls it from
+`execute_python`:
 
 ```bash
 export WEB_SEARCH_API_KEY="sk-..."
-export LLM_CLI_SYSTEM_PROMPT='You are a helpful coding agent.
+llm-cli-py -s 'You are a helpful coding agent.
 When you need web search, call the API below from execute_python:
 - Endpoint: POST https://ollama.com/api/web_search
 - Headers: Content-Type: application/json and Authorization: Bearer <value of WEB_SEARCH_API_KEY>
@@ -403,7 +402,10 @@ When you need web search, call the API below from execute_python:
 The key is available in the environment variable WEB_SEARCH_API_KEY.'
 ```
 
-Prefer referencing the key by env var name (as above), not by value.
+The prompt is a turn like any other, so it is part of the conversation and shows
+up in `/raw` and in the log. To keep a standing instruction, put it in the first
+line of every run (or in a shell function that passes it as `-s`). Prefer
+referencing the key by env var name (as above), not by value.
 
 ## Tools
 

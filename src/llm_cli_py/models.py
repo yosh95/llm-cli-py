@@ -8,9 +8,12 @@ from typing import TypedDict
 
 
 class Role(StrEnum):
-    """Message role enum matching OpenAI format."""
+    """Message role enum matching OpenAI format.
 
-    SYSTEM = "system"
+    Only roles the CLI itself produces are listed: a system message is never
+    sent, so there is no role for one.
+    """
+
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
@@ -56,7 +59,7 @@ class Message:
             log and never sent to the model: the request body is built field by
             field (see ``LlmApiClient._build_messages``), so nothing extra can
             leak onto the wire. ``None`` means nothing was measured (a user
-            turn, a system prompt, or a call that never reached a tool).
+            turn, or a call that never reached a tool).
     """
 
     role: Role

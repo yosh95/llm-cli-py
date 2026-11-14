@@ -16,7 +16,7 @@ import llm_cli_py
 from llm_cli_py.main import build_parser, initialize_tools
 from llm_cli_py.main import main as main_module_main
 
-VERSION_OUTPUT = "llm-cli-py 0.2.0"
+VERSION_OUTPUT = "llm-cli-py 0.3.0"
 
 
 def _run_as_module(*argv: str) -> subprocess.CompletedProcess[str]:
@@ -289,7 +289,7 @@ def raw_session() -> tuple:
     from llm_cli_py.tools.registry import ToolRegistry
     from tests.conftest import make_client
 
-    client = make_client("gpt-4o", system_prompt="be brief")
+    client = make_client("gpt-4o")
     client.remember(Message(role=Role.USER, content="**hello**"))
     client.remember(Message(role=Role.ASSISTANT, content="hi"))
     client.send = MagicMock(side_effect=AssertionError("/raw was sent to the model"))  # type: ignore[method-assign]
@@ -307,12 +307,11 @@ def test_raw_shows_the_conversation_as_markdown_without_asking_the_model(typed: 
 
     out = capsys.readouterr().out
     assert "# Conversation (gpt-4o)" in out
-    assert "## system\n\nbe brief" in out
     assert "## user\n\n**hello**" in out  # the model's Markdown, untouched
     assert "## assistant\n\nhi" in out
     assert "\x1b[" not in out  # nothing rendered
     client.send.assert_not_called()
-    assert len(client.state.conversation) == 3  # and nothing recorded
+    assert len(client.state.conversation) == 2  # and nothing recorded
 
 
 def test_raw_changes_neither_the_conversation_nor_the_log(tmp_path, capsys) -> None:
@@ -366,7 +365,7 @@ def test_raw_with_nothing_to_show_says_so(capsys) -> None:
     from tests.conftest import make_client
 
     session = ActiveSession(
-        make_client("gpt-4o"),  # no system prompt, so nothing has been recorded
+        make_client("gpt-4o"),  # nothing has been recorded yet
         SessionContext(tool_registry=ToolRegistry()),
     )
 

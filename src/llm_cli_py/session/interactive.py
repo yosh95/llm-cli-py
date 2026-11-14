@@ -235,8 +235,7 @@ def run_interactive(
             first turn, before the terminal prompt is shown. The session stays
             interactive afterwards -- there is no mode that answers once and
             exits. It is read like a line typed at the prompt -- so ``/raw``
-            works there too, showing the conversation as it stands (only the
-            system prompt, at that point).
+            works there too, showing the conversation as it stands.
         prompt_session: Optional prompt_toolkit PromptSession to read input with.
     """
     # Ctrl+C while the command-line turn is running means the same thing here as

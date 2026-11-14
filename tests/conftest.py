@@ -19,14 +19,9 @@ from llm_cli_py.tools.types import ExecResult
 TEST_URL = "https://api.example.invalid/v1"
 
 
-def make_client(
-    model: str = "m",
-    api_key: str = "k",
-    *,
-    system_prompt: str = "",
-) -> LlmApiClient:
+def make_client(model: str = "m", api_key: str = "k") -> LlmApiClient:
     """Build a client against a fake URL (nothing is sent until ``send``)."""
-    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key, system_prompt=system_prompt)
+    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key)
 
 
 def completion(text: str | None = None, tool_calls: list[dict] | None = None) -> dict:

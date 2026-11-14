@@ -2,8 +2,8 @@
 
 This module is the composition root: it reads the environment, builds the
 client/session/tool graph and hands control to the interactive loop. Component
-configuration (model, API URL/key, system prompt) is passed in explicitly
-rather than read from ``os.environ`` inside the components themselves.
+configuration (model, API URL/key) is passed in explicitly rather than read from
+``os.environ`` inside the components themselves.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from .consts import (
     ENV_API_URL,
     ENV_LOG_FILE,
     ENV_MODEL,
-    ENV_SYSTEM_PROMPT,
 )
 from .providers.llm_api import LlmApiClient
 from .session.interactive import make_prompt_session, run_interactive
@@ -108,7 +107,7 @@ def _conversation_log_or_none() -> ConversationLog | None:
 
     Reading it is all that happens to it: the sessions already in the file are
     carried into what this run writes, and nothing of them reaches the
-    conversation -- this run starts from its system prompt alone.
+    conversation -- this run starts empty.
     """
     configured = os.environ.get(ENV_LOG_FILE, "").strip()
     if not configured:
@@ -186,11 +185,9 @@ def main() -> None:
     # Priority: 1) --api-key, 2) LLM_CLI_API_KEY env
     api_key = (args.api_key or os.environ.get(ENV_API_KEY, "")).strip()
 
-    # ── Resolve model, system prompt and prompt text ───────────────
+    # ── Resolve model and prompt text ──────────────────────────────
     # Priority for the model: 1) -m/--model, 2) LLM_CLI_MODEL env
     model = args.model or os.environ.get(ENV_MODEL, "")
-    # Read once here (startup snapshot) and pass down; see LlmClient.__init__.
-    system_prompt = os.environ.get(ENV_SYSTEM_PROMPT, "")
     # -s values and trailing words are all prompt text, sent verbatim.
     prompt = build_prompt(args.sources, args.prompt)
 
@@ -204,7 +201,6 @@ def main() -> None:
         api_url=api_url,
         api_key=api_key,
         timeout=DEFAULT_REQUEST_TIMEOUT,
-        system_prompt=system_prompt,
         timer_factory=clock.timer,
     )
     ctx = SessionContext(

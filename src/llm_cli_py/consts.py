@@ -20,14 +20,6 @@ ENV_API_URL = "LLM_CLI_API_URL"
 ENV_MODEL = "LLM_CLI_MODEL"
 """Environment variable for the default LLM model."""
 
-ENV_SYSTEM_PROMPT = "LLM_CLI_SYSTEM_PROMPT"
-"""Environment variable holding the system prompt.
-
-Read exactly once, by the composition root (``main``), and passed to the client
-as a constructor argument -- it is seeded as the first conversation message.
-When unset or empty, no system message is sent.
-"""
-
 ENV_LOG_FILE = "LLM_CLI_LOG_FILE"
 """Environment variable holding the file conversations are written to.
 
@@ -38,8 +30,7 @@ the conversation as it stood.
 
 The file accumulates across runs: each run is one entry in its ``sessions``
 array, so starting the CLI again adds a session rather than replacing the file.
-Nothing in it is read back into the conversation, so a new run starts from its
-system prompt alone.
+Nothing in it is read back into the conversation, so a new run starts empty.
 """
 
 ENV_PROMPT_HISTORY_FILE = "LLM_CLI_PROMPT_HISTORY_FILE"

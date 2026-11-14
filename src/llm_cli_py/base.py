@@ -35,28 +35,19 @@ class LlmClient(ABC):
         self,
         model: str,
         *,
-        system_prompt: str = "",
         timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
-        """Initialize state, seeding ``system_prompt`` as the first message.
+        """Initialize state with an empty conversation.
 
-        The prompt is supplied by the caller (the CLI composition root reads
-        ``LLM_CLI_SYSTEM_PROMPT`` once at startup) rather than read from the
-        environment here: configuration is passed in explicitly, so tests and
-        other embedders can construct a client without touching ``os.environ``.
-        It is intentionally NOT re-read per request: mid-session changes would
-        make later turns inconsistent with earlier context. When empty, no
-        system message is seeded (no default/date prompt is injected), and the
-        seeded message is the only place the prompt is kept.
+        Nothing is injected ahead of the user's first turn: the CLI sends no
+        system message, so the conversation is exactly the turns that have been
+        exchanged.
 
         ``timer_factory`` builds the timer each request is measured with, so how
         long the model took is recorded next to what it said. Tests pass a
         scripted timer instead of waiting for a real one.
         """
-        self._state = ClientState(
-            model=model,
-            conversation=([Message(role=Role.SYSTEM, content=system_prompt)] if system_prompt else []),
-        )
+        self._state = ClientState(model=model)
         # Nothing is watching unless a log file was configured; see observe.
         self._observer: ConversationObserver | None = None
         self._timer_factory = timer_factory
@@ -76,9 +67,9 @@ class LlmClient(ABC):
     def remember(self, message: Message) -> None:
         """Append ``message`` to the conversation and show it to the observer.
 
-        The one place a message is recorded, so the log cannot miss a turn: the
-        system prompt, user turns, assistant replies (tool calls included) and
-        tool results all go through here.
+        The one place a message is recorded, so the log cannot miss a turn: user
+        turns, assistant replies (tool calls included) and tool results all go
+        through here.
         """
         self._state.conversation.append(message)
         if self._observer is not None:
