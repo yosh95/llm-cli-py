@@ -23,3 +23,8 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# log
+llm_cli_log
+llm_cli_prompt_history
+
