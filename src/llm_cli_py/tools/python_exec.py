@@ -226,8 +226,8 @@ def execute_python(
     interrupt is then re-raised, so the prompt comes back with nothing left
     running in the background.
 
-    The run is limited to ``timeout`` seconds (``DEFAULT_TOOL_TIMEOUT``: 3
-    minutes). A run that outlives it is killed -- with everything it spawned --
+    The run is limited to ``timeout`` seconds (``DEFAULT_TOOL_TIMEOUT``: 30
+    seconds). A run that outlives it is killed -- with everything it spawned --
     and the timeout comes back as a :class:`ToolError`, which is what the model
     is told: a tool call blocks the turn, so a runaway script has to end it
     rather than hang it. Anything that legitimately takes longer is meant to be

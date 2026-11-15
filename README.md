@@ -422,7 +422,7 @@ to the model, so the agent can read files, call APIs and run commands itself. To
 executed automatically (no approval prompt). The child runs with the same
 environment and file-system access as the CLI itself.
 
-A run is limited to **3 minutes** (`DEFAULT_TOOL_TIMEOUT` in `consts.py`). The
+A run is limited to **30 seconds** (`DEFAULT_TOOL_TIMEOUT` in `consts.py`). The
 call blocks the turn, so a script that never ends would hang the conversation:
 at the limit the code is killed together with every process it spawned, and the
 timeout -- with the output written before the kill -- is returned to the model as
