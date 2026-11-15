@@ -29,6 +29,9 @@ Python-execution tool.
 - **`/raw`** — type it at the prompt to print the whole conversation as plain
   Markdown instead of the rendered transcript, so the answer can be copied out
   of the terminal with its Markdown intact
+- **Bounded waits** — a turn waits at most two minutes for the answer and ten
+  seconds per connection, then says so instead of looking busy for ever; a
+  timeout is reported at once rather than retried into a longer wait
 - **Few dependencies** — `requests`, `prompt_toolkit`, `rich`
 
 ## Install
@@ -251,6 +254,19 @@ it started and how long the gap really was.
 The status line begins at the left edge and nothing sits to its left, so the
 running frames and the finished reading start in the same column, and the ticking
 number never moves anything else around.
+
+A request waits at most two minutes for the answer (`DEFAULT_REQUEST_TIMEOUT` in
+`consts.py`), and at most ten seconds for the connection to open
+(`DEFAULT_CONNECT_TIMEOUT`). The two limits are separate because the two failures
+mean different things: a connection that does not come up in ten seconds is a
+wrong host, a wrong port or a dead server, and saying so immediately is the point,
+while an answer that takes a while is the model working. A read timeout is not
+retried -- the reply is not streamed, so the part the provider had written is lost
+either way, and a second attempt would wait the same two minutes for the same
+wall. Connection failures are still retried with the usual backoff (so a host
+that never answers is reported in about half a minute), and so are the statuses
+that ask for it (429 and 5xx), which is why one of those can repeat the wait for
+the answer before it gives up.
 
 Durations are measured on a monotonic clock, so a system time adjustment during
 a long wait cannot produce a negative or absurd number. Stamps come from the wall

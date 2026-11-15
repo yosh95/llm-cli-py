@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from llm_cli_py.consts import DEFAULT_CONNECT_TIMEOUT
 from llm_cli_py.utils.http import HttpError, post_json
 
 
@@ -44,7 +45,9 @@ def test_post_sends_json_with_the_api_key_and_returns_the_body() -> None:
             "Accept": "application/json",
             "Authorization": "Bearer sk-1",
         },
-        timeout=30,
+        # The connect phase has its own, much shorter limit: a host that does not
+        # answer must say so in seconds instead of inheriting the answer's limit.
+        timeout=(DEFAULT_CONNECT_TIMEOUT, 30),
     )
 
 
@@ -95,3 +98,54 @@ def test_connection_error_is_retried() -> None:
         assert post_json("https://api.example.com/v1/chat/completions", {}, 30) == {"ok": True}
 
     assert post.call_count == 2 and sleep.call_count == 1
+
+
+def test_a_read_timeout_is_not_retried() -> None:
+    """A reply that missed its deadline is gone; asking again is the same wall."""
+    with (
+        patch(
+            "llm_cli_py.utils.http.requests.post",
+            side_effect=requests.ReadTimeout("read timed out"),
+        ) as post,
+        patch("llm_cli_py.utils.http.time.sleep") as sleep,
+        pytest.raises(HttpError) as excinfo,
+    ):
+        post_json("https://api.example.com/v1/chat/completions", {}, 120)
+
+    assert post.call_count == 1  # not 3: the wait is paid once, not three times
+    assert sleep.call_count == 0
+    assert "120s" in str(excinfo.value)
+    assert "NOT retried" in str(excinfo.value)
+
+
+def test_a_connect_timeout_is_retried() -> None:
+    """Connecting costs nothing to attempt again, so it still gets all attempts."""
+    ok_resp = _mock_response(200, json_data={"ok": True})
+
+    with (
+        patch(
+            "llm_cli_py.utils.http.requests.post",
+            side_effect=[requests.ConnectTimeout("connect timed out"), ok_resp],
+        ) as post,
+        patch("llm_cli_py.utils.http.time.sleep") as sleep,
+    ):
+        assert post_json("https://api.example.com/v1/chat/completions", {}, 120) == {"ok": True}
+
+    assert post.call_count == 2 and sleep.call_count == 1
+
+
+def test_every_attempt_uses_the_connect_and_read_pair() -> None:
+    """Both limits reach the transport on every attempt, retries included."""
+    ok_resp = _mock_response(200, json_data={"ok": True})
+
+    with (
+        patch(
+            "llm_cli_py.utils.http.requests.post",
+            side_effect=[requests.ConnectionError("refused"), ok_resp],
+        ) as post,
+        patch("llm_cli_py.utils.http.time.sleep"),
+    ):
+        post_json("https://api.example.com/v1/chat/completions", {}, 120)
+
+    for call in post.call_args_list:
+        assert call.kwargs["timeout"] == (DEFAULT_CONNECT_TIMEOUT, 120)

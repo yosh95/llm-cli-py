@@ -19,6 +19,13 @@ class LlmApiClient(LlmClient):
     One request per turn: the full answer (or the tool calls) is requested in a
     single non-streaming call and displayed when it arrives. No HTTP session is
     kept between turns -- each request opens and closes its own connection.
+
+    ``timeout`` is how long the *answer* may take once connected
+    (``DEFAULT_REQUEST_TIMEOUT``: 2 minutes); connecting has its own, much
+    shorter limit. Nothing is streamed, so there is no partial reply to salvage
+    when that limit is reached: the turn fails and the status line stops, which
+    is the honest report -- the alternative is a wait that looks identical to a
+    working one for as long as the limit allows.
     """
 
     def __init__(

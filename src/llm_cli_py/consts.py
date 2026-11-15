@@ -2,8 +2,32 @@
 
 # ── Timeout constants (seconds) ────────────────────────────────────
 
-DEFAULT_REQUEST_TIMEOUT: int = 300
-"""Default timeout for LLM API requests (chat completions)."""
+DEFAULT_REQUEST_TIMEOUT: int = 120
+"""Default timeout (2 minutes) for LLM API requests (chat completions).
+
+This is the *read* timeout: how long the answer may take to arrive once the
+connection is up. The request is not streamed -- one call asks for the whole
+reply -- so it is also the longest a single turn can wait for the model.
+
+A reply that has not arrived in two minutes is not a slow reply but a stuck one:
+the measured turns are seconds (median under 2s), and 120s is tens of thousands
+of tokens even on a slow model. Waiting longer cannot rescue such a turn, and
+because a read timeout is *not* retried (see ``utils/http.py``) the wait is paid
+once, not three times.
+"""
+
+DEFAULT_CONNECT_TIMEOUT: int = 10
+"""Default timeout for *opening* the connection to the LLM API.
+
+Kept apart from ``DEFAULT_REQUEST_TIMEOUT`` because the two wait for different
+things: a connection that is not up in 10 seconds is a wrong host, a wrong port
+or a dead server -- a mistake that should be reported at once, not after the
+time a whole answer is allowed. With a single timeout value the connect phase
+would inherit the read limit, so a mistyped URL would look like a slow model for
+minutes. Connecting *is* retried (a transient refusal or DNS hiccup is worth
+another attempt), so the worst case is ``DEFAULT_CONNECT_TIMEOUT`` times the
+attempt limit.
+"""
 
 DEFAULT_TOOL_TIMEOUT: int = 30
 """Default limit (30 seconds) on one ``execute_python`` run.
