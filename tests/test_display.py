@@ -416,13 +416,22 @@ def test_verbatim_text_gains_a_final_newline_only_when_it_needs_one(capsys) -> N
 
 
 @pytest.mark.usefixtures("clocks")
-def test_a_tool_block_is_stamped(plain) -> None:
+def test_a_call_is_not_stamped_but_its_result_is(plain) -> None:
+    """The call is about the present; the result is an event worth dating.
+
+    The rule printed above the call carries the time it started at, so repeating
+    it on every line of the call would only be the same number three times --
+    while the result, read afterwards, is stamped like every other line that
+    records what happened.
+    """
     display.print_tool_call("calc", {"code": "print(1)"})
     display.print_tool_result(ExecResult(stdout="1\n"))
 
-    assert "[09:32:10] [Tool] Executing tool: calc..." in plain.text
-    assert "[09:32:10] Args:" in plain.text
-    assert "[09:32:10] Tool Result:" in plain.text
+    lines = plain.text.splitlines()
+    # The rule above the call is where the time is: it opens the block, stamped.
+    assert lines[0].startswith("[09:32:10] ")
+    assert lines[1:3] == ["[Tool] Executing tool: calc...", "Args:"]
+    assert "[09:32:10] Tool Result:" in lines
 
 
 def test_a_one_line_argument_stays_on_one_line(plain) -> None:
@@ -525,7 +534,7 @@ def test_working_prints_one_finished_line_when_not_a_terminal(plain) -> None:
     with display.working("gpt-4o is thinking..."):
         pass
 
-    assert plain.text.splitlines() == ["[09:32:10] gpt-4o is thinking... 0.0s"]
+    assert plain.text.splitlines() == ["gpt-4o is thinking... 0.0s"]
 
 
 @pytest.mark.usefixtures("clocks")
@@ -540,11 +549,12 @@ def test_working_reports_the_block_s_duration(clocks, plain) -> None:
 
 @pytest.mark.parametrize("terminal_output", [False, True])
 @pytest.mark.usefixtures("clocks")
-def test_the_status_line_starts_in_the_same_column_as_every_other_line(terminal_output) -> None:
-    """The stamp opens the status line too, so the transcript keeps one column.
+def test_the_status_line_is_not_stamped(terminal_output) -> None:
+    """Progress is not an event: the line says how long, not when.
 
-    Anything drawn to the left of the stamp -- an animation, say -- would push the
-    stamp to the right while the block ran, and back to the edge when it ended.
+    The rule printed before the operation carries the time it started at, and the
+    status line is the only line that is rewritten a hundred times while it runs
+    -- a stamp on it would be the one thing on the line that never had to move.
     """
     out = capture(terminal=terminal_output)
 
@@ -554,9 +564,9 @@ def test_the_status_line_starts_in_the_same_column_as_every_other_line(terminal_
     display.report_info("done")
 
     status, info = out.text.rstrip().splitlines()[-2:]
-    assert status.startswith("[09:32:10] gpt-4o is thinking... ")
+    assert status.startswith("gpt-4o is thinking... ")
+    assert status.index("gpt-4o") == 0  # nothing to the left of the label
     assert info.startswith("[09:32:10] INFO: done")
-    assert status.index("[09:32:10]") == info.index("[09:32:10]") == 0
 
 
 def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch, terminal) -> None:
@@ -569,7 +579,7 @@ def test_working_redraws_in_place_on_a_terminal(clocks, monkeypatch, terminal) -
 
     # The frames overwrite each other; what remains visible is the last one.
     last = terminal.text.rstrip().splitlines()[-1]
-    assert last.endswith("[09:32:12] gpt-4o is thinking... 2.0s")
+    assert last == "gpt-4o is thinking... 2.0s"
     assert "\r\x1b[2K" in terminal.raw  # each frame is erased before the next
     assert "\x1b[?25l" in terminal.raw  # the cursor was hidden while it ran
     assert "\x1b[?25h" in terminal.raw  # and shown again afterwards
@@ -607,7 +617,7 @@ def test_an_exception_leaves_the_status_line_closed(terminal) -> None:
         msg = "boom"
         raise RuntimeError(msg)
 
-    assert terminal.text.splitlines()[-1].endswith("[09:32:10] calc running... 0.0s")
+    assert terminal.text.splitlines()[-1].endswith("calc running... 0.0s")
     assert terminal.text.endswith("\n")
 
 

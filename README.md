@@ -20,9 +20,9 @@ Python-execution tool.
   bindings are kept: the arrow keys recall earlier turns, Ctrl+X Ctrl+E opens the
   line in your editor, and Ctrl+Z suspends the CLI on Unix (where there is a
   `SIGTSTP` to send)
-- **Time on screen** — every line is stamped with the wall-clock time, every rule
-  carries the session's uptime, and a request or a tool run shows how long it has
-  been running
+- **Time on screen** — the lines that record something (an answer, a report, a
+  tool's result) are stamped with the wall-clock time, every rule carries the
+  session's uptime, and a request or a tool run shows how long it has been running
 - **Readable output** — answers are rendered as Markdown, code in a tool call is
   syntax-highlighted, results are coloured by outcome: on a terminal only, so a
   redirected transcript stays plain text
@@ -213,26 +213,33 @@ llm-cli-py -m gpt-4o "Write a haiku about JSON" > haiku.txt
 
 ### Time in the transcript
 
-Every line is stamped with the wall-clock time it was written, and every rule
-carries, at its right end, how long the session has been running:
+The lines that record something — a report, a tool's result — are stamped with
+the wall-clock time they were written, and every rule carries, at its right end,
+how long the session has been running:
 
 ```text
 [09:32:10] ──────────────────────────────────────────────── [+00:00:00]
-[09:32:10] gpt-4o is thinking... 0.0s
-[09:32:11] gpt-4o is thinking... 1.0s
-[09:32:13] gpt-4o is thinking... 2.5s
+gpt-4o is thinking... 0.0s
+gpt-4o is thinking... 2.5s
 [09:32:13] ──────────────────────────────────────────────── [+00:00:02]
-[09:32:13] [Tool] Executing tool: execute_python...
-[09:32:13] Args:
+[Tool] Executing tool: execute_python...
+Args:
   [code] import time; time.sleep(3); print("done")
-[09:32:13] [Tool] execute_python running... 0.0s
-[09:32:16] [Tool] execute_python running... 3.0s
+[Tool] execute_python running... 0.0s
+[Tool] execute_python running... 3.0s
 [09:32:16] ──────────────────────────────────────────────── [+00:00:05]
 [09:32:16] Tool Result:
     Exit code: 0
     [stdout]
       done
 ```
+
+Progress is the exception. The status line of a running request or tool call, and
+the block that announces the call, carry no stamp: they are about what is
+happening now rather than about an event, and between them they already show what
+the clock would say — the rule above the call was stamped when it started, and the
+status line counts the seconds since. On a status line a stamp would be the one
+thing on it that never needed to change while the line was redrawn.
 
 A request to the model and a tool run are the two places where the CLI can go
 quiet for a long time. Each shows a status line with the time elapsed, redrawn in
@@ -241,9 +248,9 @@ duration. A counter that keeps moving is what tells a slow provider or a slow
 script apart from a stuck one; the stamps on the surrounding lines then say when
 it started and how long the gap really was.
 
-The status line begins with its stamp, like every other line of the transcript:
-nothing sits to its left, so the running frames and the finished reading start in
-the same column as the rules, the labels and the answers around them.
+The status line begins at the left edge and nothing sits to its left, so the
+running frames and the finished reading start in the same column, and the ticking
+number never moves anything else around.
 
 Durations are measured on a monotonic clock, so a system time adjustment during
 a long wait cannot produce a negative or absurd number. Stamps come from the wall

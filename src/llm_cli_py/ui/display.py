@@ -15,10 +15,11 @@ Two rules decide what a line looks like:
   So ``llm-cli-py ... > answer.md`` still writes the answer as the model wrote
   it, and ``NO_COLOR=1`` (which ``rich`` honours) turns colours off in a
   terminal.
-* **The clock is part of the transcript.** Every line is stamped with the
-  wall-clock time (``[09:32:10]``), so a transcript read afterwards -- or
-  watched through ``tail -f`` -- lines up with everything else that happened at
-  that moment. The rule also carries how long the session has been running
+* **The clock is part of the transcript.** A line that records something that
+  happened -- an answer, a report, a tool's result -- is stamped with the
+  wall-clock time (``[09:32:10]``), so a transcript read afterwards -- or watched
+  through ``tail -f`` -- lines up with everything else that happened at that
+  moment. The rule also carries how long the session has been running
   (``[+00:03:21]``) at its right end, so the gap between two rules is visible
   without doing arithmetic on the stamps -- and a session that has been open all
   afternoon is not mistaken for an unbroken run of work.
@@ -27,8 +28,15 @@ Neither of those answers the question a long silence raises: *is this still
 working, or is it stuck?* For that, an operation that blocks -- a request to the
 model, a tool run -- gets a status line (:func:`working`) with the time elapsed
 so far, redrawn in place while it runs. A counter that keeps moving is the whole
-proof that the process is alive -- and the line starts at the stamp, in the
-column every other line of the transcript starts in.
+proof that the process is alive.
+
+Progress is the exception: the status line of a running operation
+(:func:`working`) and the block that announces a tool call
+(:func:`print_tool_call`) carry no stamp. They describe the present rather than
+an event -- the status line already says how long it has lasted, and the call has
+a rule stamped just above it -- so a stamp there would be a number rewritten ten
+times a second, or repeated on every line of a block whose time is already on
+screen.
 
 One thing here is deliberately not styled at all: :func:`print_verbatim` writes
 text that is meant to be copied out of the terminal -- ``/raw``'s Markdown -- so
@@ -141,11 +149,25 @@ def _format_uptime(seconds: float) -> str:
     return f"+{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
-def _stamped(rest: Text | RenderableType, *, label: str = "", label_style: str = "") -> Text:
-    """Prefix ``rest`` with the current stamp, and optionally a styled label."""
+def _stamped(
+    rest: Text | RenderableType,
+    *,
+    label: str = "",
+    label_style: str = "",
+    with_stamp: bool = True,
+) -> Text:
+    """Prefix ``rest`` with the current stamp, and optionally a styled label.
+
+    ``with_stamp=False`` drops the stamp from a line that is about what is
+    happening now rather than about when it happened: a progress line, or the
+    header of a tool call, whose time is on the rule printed above it. The label
+    and the text are unchanged -- only the leading ``[HH:MM:SS]`` goes -- so such
+    a line starts at the left edge.
+    """
     line = Text()
-    line.append(stamp(), style="dim")
-    line.append(" ")
+    if with_stamp:
+        line.append(stamp(), style="dim")
+        line.append(" ")
     if label:
         line.append(label, style=label_style)
         line.append(" ")
@@ -271,16 +293,20 @@ def print_tool_call(name: str, arguments: dict[str, object]) -> None:
     being mangled into one long line. On a terminal such a value is also
     syntax-highlighted -- when an agent shows you the Python it is about to run,
     the code should look like code.
+
+    The block is not stamped. It describes a call that has not run yet, and the
+    rule that opened it carries the time, so the only clock the call itself needs
+    is the duration its status line shows (:func:`working`).
     """
     print_rule()
-    header = _stamped(Text(), label="[Tool]", label_style="bold cyan")
+    header = _stamped(Text(), label="[Tool]", label_style="bold cyan", with_stamp=False)
     header.append(f"Executing tool: {name}...", style="bold")
     _print(header)
 
     if not arguments:
         return
 
-    _print(_stamped(Text("Args:", style="dim")))
+    _print(_stamped(Text("Args:", style="dim"), with_stamp=False))
     for arg_name, value in arguments.items():
         text = value if isinstance(value, str) else str(value)
         # Code is almost always written with a trailing newline; dropping it
@@ -375,18 +401,15 @@ def _result_line_style(line: str, ok: bool) -> str:
 
 
 def _working_line(label: str, seconds: float) -> Text:
-    """The status line of a running operation: ``[09:32:13] gpt-4o is thinking... 2.5s``.
+    """The status line of a running operation: ``gpt-4o is thinking... 2.5s``.
 
-    The line starts at the stamp, in the same column as every other stamped line
-    of the transcript -- which is what the frames of one operation share, and what
-    the operation shares with the rules, the labels and the answers above and
-    below it. Nothing is drawn to the left of the stamp: an animation there would
-    push the stamp off that column while the block ran and back to the edge when
-    it ended, and would be the one part of the line with nothing to say.
+    The line starts at the left edge, without a stamp: what it has to say is how
+    long the operation has been running, and the rule printed before it already
+    says when it started. A stamp here would be the one number on a line that is
+    redrawn ten times a second that never needed to move -- and it would leave the
+    label that much less room before the line has to wrap.
     """
     body = Text()
-    body.append(stamp(), style="dim")
-    body.append(" ")
     body.append(label, style="yellow")
     body.append(" ")
     body.append(format_duration(seconds), style="bold green")
@@ -400,14 +423,13 @@ def working(label: str) -> Iterator[Timer]:
     Inside a terminal the line redraws ten times a second, so it reads as alive
     rather than as a number that happens to change::
 
-        [09:32:10] gpt-4o is thinking... 0.0s
-        [09:32:13] gpt-4o is thinking... 3.2s
+        gpt-4o is thinking... 0.0s
+        gpt-4o is thinking... 3.2s
 
     A counter that keeps moving is what distinguishes a slow provider from a hung
-    one, and the line is drawn from the stamp -- the same leading column as every
-    other stamped line of the transcript -- so the ticking number never shifts the
-    stamp out of place. The final reading stays on screen as the operation's
-    duration.
+    one, and the final reading stays on screen as the operation's duration. The
+    line is not stamped: it is progress, not an event, and the rule printed
+    before the operation carries the time it started at.
 
     Anywhere else -- output redirected to a file, captured by a test -- nothing is
     written until the block ends, and then the same final line is printed once: a
