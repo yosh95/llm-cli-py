@@ -97,6 +97,32 @@ def test_a_timed_out_run_leaves_nothing_running() -> None:
         pytest.fail(f"the grandchild {pid} survived the timeout")
 
 
+def test_the_call_returns_at_the_deadline_even_if_a_pipe_stays_open() -> None:
+    """The deadline bounds the whole call, not just the time the code may run.
+
+    Regression: a descendant that left the process group (``setsid``) keeps the
+    child's stdout/stderr open after the kill. Waiting for those pipes to close
+    gave the run its time back -- five seconds of it -- so the call reported the
+    timeout late (a 30-second limit took 35 seconds), and it threw away the
+    output it had waited for. The output must survive the shortcut.
+    """
+    code = (
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],"
+        " start_new_session=True)\n"
+        "print('before the deadline', flush=True)\n"
+        "time.sleep(60)"
+    )
+    started = time.monotonic()
+    result = execute_python(code, timeout=1.0)
+    elapsed = time.monotonic() - started
+
+    assert isinstance(result, ToolError)
+    assert result.error.startswith("TIMEOUT")
+    assert elapsed < 2  # the deadline, not the deadline plus a wait on the pipe
+    assert "before the deadline" in result.error
+
+
 def _is_zombie(pid: int) -> bool:
     """Return True if ``pid`` exists but has already exited (a zombie entry)."""
     try:

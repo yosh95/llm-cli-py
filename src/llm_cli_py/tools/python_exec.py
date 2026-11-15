@@ -24,6 +24,19 @@ only falls back to ``python3`` if the CLI process has no usable interpreter
 (e.g. under some embedded/frozen builds).
 """
 
+_CHILD_ENCODING = "utf-8"
+"""Encoding the child's output is read and decoded with.
+
+The CLI may run where the locale is not UTF-8 (cp932 on Japanese Windows, say),
+so the child is told to write UTF-8 (``PYTHONIOENCODING``) and both ends of the
+pipe use this. Undecodable bytes are replaced rather than raised: a tool result
+that fails to decode is worse than one with a stray character in it.
+"""
+
+_CHILD_ERRORS = "replace"
+"""How undecodable bytes in the child's output are handled (see above)."""
+
+
 _SHELL_META = {">", "<", "|", "2>&1", "2>", "1>", ">>", "2>>", ";", "&", "`", "$("}
 """Tokens that mean something to a shell but are inert inside an argv list.
 
@@ -163,26 +176,45 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
             kill(target, signal.SIGKILL)
 
 
-def _drain_killed_process(proc: subprocess.Popen[str]) -> tuple[str, str]:
-    """Collect what a killed child already wrote, without waiting on a stuck pipe.
+def _partial_output(exc: subprocess.TimeoutExpired) -> tuple[str, str]:
+    """Return what the child wrote before its deadline, from the timeout itself.
 
-    The process group has been killed by the time this runs, so ``communicate``
-    returns almost immediately: the pipes close as soon as the last writer is
-    gone. A descendant that left the group (it called ``setsid()``) can still
-    hold a pipe open, though, and waiting for it would mean waiting for exactly
-    the run the timeout exists to stop -- so the pipes are dropped instead and
-    the timeout stands without that output.
+    ``communicate`` carries the output it had already read into the exception it
+    raises, so nothing has to be read again -- and nothing *should* be: the
+    remaining bytes are still out there only if a writer still holds the pipe,
+    which is the case this path exists to stop waiting for.
+
+    In text mode the buffered bytes are handed back undecoded, so they are
+    decoded here the way the pipe itself was configured.
     """
-    try:
-        return proc.communicate(timeout=5)
-    except subprocess.TimeoutExpired:
-        for stream in (proc.stdout, proc.stderr):
-            if stream is not None:
-                with contextlib.suppress(Exception):
-                    stream.close()
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=5)
-        return "", ""
+
+    def as_text(data: bytes | str | None) -> str:
+        if data is None:
+            return ""
+        if isinstance(data, bytes):
+            return data.decode(_CHILD_ENCODING, _CHILD_ERRORS)
+        return data
+
+    return as_text(exc.output), as_text(exc.stderr)
+
+
+def _reap_killed_process(proc: subprocess.Popen[str]) -> None:
+    """Reap a killed child and let go of its pipes, without waiting on a stuck one.
+
+    ``wait`` waits for the direct child only, and that child has been SIGKILLed,
+    so it returns at once -- a descendant that left the process group cannot
+    hold it up. The pipes are then closed rather than drained to EOF for the
+    same reason: a descendant still holding one open would keep the call alive
+    for exactly the run the timeout exists to stop. Nothing is lost by closing
+    them, because whatever the child wrote was taken from the timeout before
+    the kill (see ``_partial_output``).
+    """
+    with contextlib.suppress(Exception):
+        proc.wait(timeout=5)
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            with contextlib.suppress(Exception):
+                stream.close()
 
 
 def _timeout_error(timeout_seconds: float, stdout: str, stderr: str) -> ToolError:
@@ -233,6 +265,11 @@ def execute_python(
     rather than hang it. Anything that legitimately takes longer is meant to be
     started in the background, and the tool description says so.
 
+    The deadline is the *whole* call's, not the code's: nothing after it -- the
+    kill, the reap, reading what the code had already written -- waits on the
+    child or on anything the child started, so a run cut off at ``timeout`` is
+    reported at ``timeout`` and not a moment later.
+
     Ctrl+C still ends a run early, whatever the remaining time.
 
     Code that calls ``subprocess`` with ``shell=True`` and an argv list is
@@ -271,8 +308,8 @@ def execute_python(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            encoding="utf-8",
-            errors="replace",
+            encoding=_CHILD_ENCODING,
+            errors=_CHILD_ERRORS,
             env=env,
             # Own session = own process group. The terminal's Ctrl+C therefore
             # skips the executed code, which is killed explicitly below instead;
@@ -282,14 +319,22 @@ def execute_python(
         )
         stdout, stderr = proc.communicate(timeout=timeout)
         return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
-    except subprocess.TimeoutExpired:
-        # Take the process group down first: the child may be blocked in a way
-        # that outlives a signal to the child alone (it is waiting on a
-        # grandchild, say), and anything it spawned would otherwise keep running
-        # after the model has been told the run ended.
+    except subprocess.TimeoutExpired as deadline:
+        # The deadline is the call's, so nothing after this point waits on the
+        # code again: what it wrote comes out of the exception, the group is
+        # killed, and the child is reaped -- each of those is bounded by the
+        # parent, never by what the child or its descendants are doing. (Waiting
+        # for the pipes to close here would hand the run its time back: a
+        # descendant that called ``setsid()`` holds them open as long as it
+        # likes, and five seconds of that made a 30-second timeout take 35.)
+        stdout, stderr = _partial_output(deadline)
         if proc is not None:
+            # Take the process group down first: the child may be blocked in a
+            # way that outlives a signal to the child alone (it is waiting on a
+            # grandchild, say), and anything it spawned would otherwise keep
+            # running after the model has been told the run ended.
             _kill_process_group(proc)
-        stdout, stderr = _drain_killed_process(proc) if proc is not None else ("", "")
+            _reap_killed_process(proc)
         return _timeout_error(timeout, stdout, stderr)
     except KeyboardInterrupt:
         # Kill the child and everything it spawned, reap it, then let the
