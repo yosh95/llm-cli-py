@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from llm_cli_py.tools.python_exec import _check_shell_true_with_list, execute_python
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from llm_cli_py.consts import DEFAULT_TOOL_TIMEOUT
+from llm_cli_py.tools.python_exec import (
+    PYTHON_TOOL_DESCRIPTION,
+    _check_shell_true_with_list,
+    execute_python,
+)
 from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult, ToolError
 
@@ -46,6 +57,70 @@ def test_metacharacters_in_an_argv_list_are_not_refused() -> None:
     code = """import subprocess
 subprocess.run(["curl", "-s", "https://api.example.com/search?a=1&b=2"])"""
     assert isinstance(execute_python(code), ExecResult)
+
+
+def test_a_run_that_exceeds_the_timeout_is_killed_and_reported() -> None:
+    """The timeout is the call's result, and the call returns at the deadline."""
+    started = time.monotonic()
+    result = execute_python("import time\ntime.sleep(30)", timeout=0.5)
+    elapsed = time.monotonic() - started
+
+    assert isinstance(result, ToolError)
+    assert result.error.startswith("TIMEOUT")
+    assert "background" in result.error  # tells the model what to do instead
+    assert elapsed < 10  # killed at the deadline, not when the code felt like it
+
+
+def test_a_timed_out_run_leaves_nothing_running() -> None:
+    """The whole process group goes, not just the child Python process."""
+    result = execute_python(
+        "import subprocess, sys, time\n"
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(p.pid, flush=True)\n"
+        "time.sleep(60)",
+        timeout=1.0,
+    )
+    assert isinstance(result, ToolError)
+    pid = int(result.error.split("[stdout]")[1].split()[0])
+    # A killed process lingers as a zombie until its (also killed) parent's
+    # death is noticed, so "gone" means gone or dead -- not "reaped by now".
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        if _is_zombie(pid):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"the grandchild {pid} survived the timeout")
+
+
+def _is_zombie(pid: int) -> bool:
+    """Return True if ``pid`` exists but has already exited (a zombie entry)."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z"
+    except OSError:
+        return False
+
+
+def test_output_written_before_the_timeout_is_reported() -> None:
+    result = execute_python("print('started', flush=True)\nimport time\ntime.sleep(30)", timeout=0.5)
+    assert isinstance(result, ToolError)
+    assert "started" in result.error
+    assert "incomplete" in result.error
+
+
+def test_a_run_inside_the_timeout_is_unaffected() -> None:
+    result = execute_python("print('done')", timeout=60)
+    assert isinstance(result, ExecResult)
+    assert result.stdout.strip() == "done"
+
+
+def test_the_description_mentions_the_timeout_and_backgrounding() -> None:
+    assert str(DEFAULT_TOOL_TIMEOUT) in PYTHON_TOOL_DESCRIPTION
+    assert "background" in PYTHON_TOOL_DESCRIPTION
 
 
 def test_tool_result_types_serialise() -> None:

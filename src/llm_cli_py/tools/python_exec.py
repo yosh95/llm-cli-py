@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..consts import DEFAULT_CHILD_PYTHON
+from ..consts import DEFAULT_CHILD_PYTHON, DEFAULT_TOOL_TIMEOUT
 from .types import ExecResult, ToolError
 
 ENV_PYTHON_EXEC = "LLM_CLI_PYTHON_EXEC"
@@ -163,8 +163,59 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
             kill(target, signal.SIGKILL)
 
 
+def _drain_killed_process(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    """Collect what a killed child already wrote, without waiting on a stuck pipe.
+
+    The process group has been killed by the time this runs, so ``communicate``
+    returns almost immediately: the pipes close as soon as the last writer is
+    gone. A descendant that left the group (it called ``setsid()``) can still
+    hold a pipe open, though, and waiting for it would mean waiting for exactly
+    the run the timeout exists to stop -- so the pipes are dropped instead and
+    the timeout stands without that output.
+    """
+    try:
+        return proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    stream.close()
+        with contextlib.suppress(Exception):
+            proc.wait(timeout=5)
+        return "", ""
+
+
+def _timeout_error(timeout_seconds: float, stdout: str, stderr: str) -> ToolError:
+    """Build the ``ToolError`` the model is given when a run is killed for time.
+
+    The message is the result of the call, so it has to say what happened, that
+    re-running the same code will hit the same wall, and what to do instead --
+    the run that was cut off cannot answer that for itself.
+    """
+    parts = [
+        f"TIMEOUT: the code did not finish within {timeout_seconds:g}s and was killed "
+        "(with every process it started).",
+        "There is no exit code and no complete output: treat the run as unfinished, not as failed code.",
+        "Do not re-run the same code unchanged. Anything that may take longer belongs "
+        "in the background: start it detached and return at once, then check it in a "
+        "later call. For example:",
+        "    subprocess.Popen([sys.executable, 'job.py'], stdout=open('/tmp/job.log', 'w'),"
+        " stderr=subprocess.STDOUT, start_new_session=True)",
+        "then read /tmp/job.log (or check the pid) in the next tool call.",
+    ]
+    if stdout.strip() or stderr.strip():
+        parts.append("[output written before the kill -- incomplete]")
+        for name, text in (("stdout", stdout), ("stderr", stderr)):
+            if text.strip():
+                parts.append(f"[{name}]")
+                parts.extend(f"  {line}" for line in text.rstrip().splitlines())
+    return ToolError(error="\n".join(parts))
+
+
 def execute_python(
     code: str,
+    *,
+    timeout: float = DEFAULT_TOOL_TIMEOUT,
 ) -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
@@ -175,7 +226,14 @@ def execute_python(
     interrupt is then re-raised, so the prompt comes back with nothing left
     running in the background.
 
-    Runs without a timeout by design; the user interrupts with Ctrl+C.
+    The run is limited to ``timeout`` seconds (``DEFAULT_TOOL_TIMEOUT``: 3
+    minutes). A run that outlives it is killed -- with everything it spawned --
+    and the timeout comes back as a :class:`ToolError`, which is what the model
+    is told: a tool call blocks the turn, so a runaway script has to end it
+    rather than hang it. Anything that legitimately takes longer is meant to be
+    started in the background, and the tool description says so.
+
+    Ctrl+C still ends a run early, whatever the remaining time.
 
     Code that calls ``subprocess`` with ``shell=True`` and an argv list is
     refused before anything runs (see ``_check_shell_true_with_list``), because
@@ -183,9 +241,10 @@ def execute_python(
 
     Args:
         code: The Python code to execute.
+        timeout: Seconds the code may run before it is killed.
 
     Returns:
-        ExecResult on completion, ToolError on failure.
+        ExecResult on completion, ToolError on failure (timeout included).
 
     Raises:
         KeyboardInterrupt: If the user interrupts the execution (Ctrl+C).
@@ -221,8 +280,17 @@ def execute_python(
             # either -- the code keeps running while the CLI is suspended.
             start_new_session=True,
         )
-        stdout, stderr = proc.communicate()
+        stdout, stderr = proc.communicate(timeout=timeout)
         return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
+    except subprocess.TimeoutExpired:
+        # Take the process group down first: the child may be blocked in a way
+        # that outlives a signal to the child alone (it is waiting on a
+        # grandchild, say), and anything it spawned would otherwise keep running
+        # after the model has been told the run ended.
+        if proc is not None:
+            _kill_process_group(proc)
+        stdout, stderr = _drain_killed_process(proc) if proc is not None else ("", "")
+        return _timeout_error(timeout, stdout, stderr)
     except KeyboardInterrupt:
         # Kill the child and everything it spawned, reap it, then let the
         # interrupt continue to the caller (the session loop silently returns
@@ -257,4 +325,14 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
     "required": ["code"],
 }
 
-PYTHON_TOOL_DESCRIPTION = "Execute Python code in a subprocess and return stdout/stderr."
+PYTHON_TOOL_DESCRIPTION = f"""\
+Execute Python code in a subprocess and return stdout/stderr.
+
+The call blocks until the code exits and is limited to {DEFAULT_TOOL_TIMEOUT} seconds.
+Long-running work must not be run in the foreground: start it in the background
+as a detached process (subprocess.Popen(..., start_new_session=True) with its
+output written to a file) and return immediately, then check the file, the pid
+or a result later in another call. A run that reaches the limit is killed,
+together with every process it started, and the timeout is returned as this
+call's result -- nothing keeps running for you afterwards.
+"""

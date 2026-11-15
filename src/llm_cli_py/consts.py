@@ -5,6 +5,17 @@
 DEFAULT_REQUEST_TIMEOUT: int = 300
 """Default timeout for LLM API requests (chat completions)."""
 
+DEFAULT_TOOL_TIMEOUT: int = 180
+"""Default limit (3 minutes) on one ``execute_python`` run.
+
+A tool call blocks the turn: the model waits for the result before it can do
+anything else. A run that outlives this limit is killed -- with every process it
+started -- and the timeout goes back to the model as that call's result, so a
+runaway script ends the turn instead of hanging it. Work that is meant to take
+longer belongs in the background (the tool description says so), where a later
+call can check on it.
+"""
+
 DEFAULT_CHILD_PYTHON: str = "python3"
 """Interpreter used by ``execute_python`` when the env var below is unset."""
 

@@ -361,7 +361,7 @@ was never recorded).
 
 Within a session, the file is rewritten as the conversation grows, so what is on
 disk is always that session as it stood, including after a run that ends badly: a
-request that fails, a tool that hangs, a `kill`, or a Ctrl+C halfway through a
+request that fails, a tool that times out, a `kill`, or a Ctrl+C halfway through a
 turn all leave everything recorded up to that point, as one parseable JSON
 document. (The exception is a turn that is deliberately *discarded* -- a tool
 call whose arguments did not parse, or an interrupted tool run -- which is rolled
@@ -420,9 +420,16 @@ referencing the key by env var name (as above), not by value.
 subprocess and returns the exit code plus stdout/stderr. Its output is sent back
 to the model, so the agent can read files, call APIs and run commands itself. Tool calls are always
 executed automatically (no approval prompt). The child runs with the same
-environment and file-system access as the CLI itself, and runs without a
-timeout: interrupt it with Ctrl+C, which kills the code and everything it
-spawned.
+environment and file-system access as the CLI itself.
+
+A run is limited to **3 minutes** (`DEFAULT_TOOL_TIMEOUT` in `consts.py`). The
+call blocks the turn, so a script that never ends would hang the conversation:
+at the limit the code is killed together with every process it spawned, and the
+timeout -- with the output written before the kill -- is returned to the model as
+that call's result, telling it to put the work in the background instead of
+re-running it. The tool description says the same, so the model starts long work
+detached (`subprocess.Popen(..., start_new_session=True)` writing to a file) and
+checks it in a later call. Ctrl+C still ends a run early, whatever time is left.
 
 A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as

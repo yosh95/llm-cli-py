@@ -123,10 +123,10 @@ class ActiveSession:
                 _append_tool_message(self.client, message, tc.id)
                 continue
 
-            # Tool code runs without a timeout, so the elapsed time is the only
-            # sign of whether it is working or spinning. The same timer is
-            # recorded with the result, so the log says how long it took even
-            # when the run failed.
+            # The elapsed time says whether a tool is working or spinning; the
+            # tool itself stops a run that goes on too long and hands the
+            # timeout back as its result. The same timer is recorded with the
+            # result, so the log says how long it took even when it failed.
             try:
                 with ui.display.working(f"[Tool] {tc.name} running...") as timer:
                     result = tool.func(**tc.arguments)
