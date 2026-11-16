@@ -29,9 +29,9 @@ Python-execution tool.
 - **`/raw`** — type it at the prompt to print the whole conversation as plain
   Markdown instead of the rendered transcript, so the answer can be copied out
   of the terminal with its Markdown intact
-- **Bounded waits** — a turn waits at most two minutes for the answer and ten
-  seconds per connection, then says so instead of looking busy for ever; a
-  timeout is reported at once rather than retried into a longer wait
+- **No waits cut short** — a request or a tool run is never killed for taking
+  its time: the status line says something is still running, and Ctrl+C is what
+  ends a wait that should not go on
 - **Few dependencies** — `requests`, `prompt_toolkit`, `rich`
 
 ## Install
@@ -255,18 +255,12 @@ The status line begins at the left edge and nothing sits to its left, so the
 running frames and the finished reading start in the same column, and the ticking
 number never moves anything else around.
 
-A request waits at most two minutes for the answer (`DEFAULT_REQUEST_TIMEOUT` in
-`consts.py`), and at most ten seconds for the connection to open
-(`DEFAULT_CONNECT_TIMEOUT`). The two limits are separate because the two failures
-mean different things: a connection that does not come up in ten seconds is a
-wrong host, a wrong port or a dead server, and saying so immediately is the point,
-while an answer that takes a while is the model working. A read timeout is not
-retried -- the reply is not streamed, so the part the provider had written is lost
-either way, and a second attempt would wait the same two minutes for the same
-wall. Connection failures are still retried with the usual backoff (so a host
-that never answers is reported in about half a minute), and so are the statuses
-that ask for it (429 and 5xx), which is why one of those can repeat the wait for
-the answer before it gives up.
+A request has no time limit: no `timeout` is handed to `requests`, so the
+connection and the answer are waited for as long as they take. The status line
+keeps counting, which is what tells a slow model apart from a dead one, and
+Ctrl+C ends the wait. Connection failures are still retried with the usual
+backoff, and so are the statuses that ask for it (429 and 5xx), which is why one
+of those can repeat the wait for the answer before it gives up.
 
 Durations are measured on a monotonic clock, so a system time adjustment during
 a long wait cannot produce a negative or absurd number. Stamps come from the wall
@@ -438,14 +432,15 @@ to the model, so the agent can read files, call APIs and run commands itself. To
 executed automatically (no approval prompt). The child runs with the same
 environment and file-system access as the CLI itself.
 
-A run is limited to **30 seconds** (`DEFAULT_TOOL_TIMEOUT` in `consts.py`). The
-call blocks the turn, so a script that never ends would hang the conversation:
-at the limit the code is killed together with every process it spawned, and the
-timeout -- with the output written before the kill -- is returned to the model as
-that call's result, telling it to put the work in the background instead of
-re-running it. The tool description says the same, so the model starts long work
-detached (`subprocess.Popen(..., start_new_session=True)` writing to a file) and
-checks it in a later call. Ctrl+C still ends a run early, whatever time is left.
+A run has **no time limit**: the call returns when the code does, however long
+that takes, and nothing is killed for taking its time. The call blocks the turn,
+so a script that never ends keeps the turn waiting -- the running timer on the
+status line shows it is still working, and Ctrl+C ends it: the child is killed
+together with every process it spawned, and the prompt comes back with nothing
+left running behind it. The tool description tells the model the same, and that
+work which is not needed right away is better started detached
+(`subprocess.Popen(..., start_new_session=True)` writing to a file) and checked
+in a later call.
 
 A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as

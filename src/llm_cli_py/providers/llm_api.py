@@ -7,7 +7,6 @@ from collections.abc import Callable
 from typing import Any
 
 from ..base import LlmClient
-from ..consts import DEFAULT_REQUEST_TIMEOUT
 from ..models import LlmResponse, Message, Role, ToolCall, ToolCallPayload, ToolSchema
 from ..utils.clock import Timer
 from ..utils.http import post_json
@@ -20,12 +19,10 @@ class LlmApiClient(LlmClient):
     single non-streaming call and displayed when it arrives. No HTTP session is
     kept between turns -- each request opens and closes its own connection.
 
-    ``timeout`` is how long the *answer* may take once connected
-    (``DEFAULT_REQUEST_TIMEOUT``: 2 minutes); connecting has its own, much
-    shorter limit. Nothing is streamed, so there is no partial reply to salvage
-    when that limit is reached: the turn fails and the status line stops, which
-    is the honest report -- the alternative is a wait that looks identical to a
-    working one for as long as the limit allows.
+    The wait for the answer has no time limit: a slow model is simply waited
+    for, and Ctrl+C is what ends a turn that should not go on. Nothing is
+    streamed, so there is no partial reply either way -- the turn ends with
+    either the whole answer or an error.
     """
 
     def __init__(
@@ -33,7 +30,6 @@ class LlmApiClient(LlmClient):
         model: str,
         api_url: str,
         api_key: str | None = None,
-        timeout: int = DEFAULT_REQUEST_TIMEOUT,
         *,
         timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
@@ -42,7 +38,6 @@ class LlmApiClient(LlmClient):
         # base URL is never needed again (and a trailing "/" is harmless).
         self._endpoint = api_url.rstrip("/") + "/chat/completions"
         self._api_key = api_key or ""
-        self._timeout = timeout
 
     def _build_messages(self) -> list[dict[str, object]]:
         """Build the messages array for the API request.
@@ -205,7 +200,6 @@ class LlmApiClient(LlmClient):
         payload = post_json(
             self._endpoint,
             body,
-            self._timeout,
             api_key=self._api_key,
         )
         duration_ms = timer.elapsed_ms()

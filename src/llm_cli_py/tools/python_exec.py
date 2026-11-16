@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..consts import DEFAULT_CHILD_PYTHON, DEFAULT_TOOL_TIMEOUT
+from ..consts import DEFAULT_CHILD_PYTHON
 from .types import ExecResult, ToolError
 
 ENV_PYTHON_EXEC = "LLM_CLI_PYTHON_EXEC"
@@ -176,79 +176,7 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
             kill(target, signal.SIGKILL)
 
 
-def _partial_output(exc: subprocess.TimeoutExpired) -> tuple[str, str]:
-    """Return what the child wrote before its deadline, from the timeout itself.
-
-    ``communicate`` carries the output it had already read into the exception it
-    raises, so nothing has to be read again -- and nothing *should* be: the
-    remaining bytes are still out there only if a writer still holds the pipe,
-    which is the case this path exists to stop waiting for.
-
-    In text mode the buffered bytes are handed back undecoded, so they are
-    decoded here the way the pipe itself was configured.
-    """
-
-    def as_text(data: bytes | str | None) -> str:
-        if data is None:
-            return ""
-        if isinstance(data, bytes):
-            return data.decode(_CHILD_ENCODING, _CHILD_ERRORS)
-        return data
-
-    return as_text(exc.output), as_text(exc.stderr)
-
-
-def _reap_killed_process(proc: subprocess.Popen[str]) -> None:
-    """Reap a killed child and let go of its pipes, without waiting on a stuck one.
-
-    ``wait`` waits for the direct child only, and that child has been SIGKILLed,
-    so it returns at once -- a descendant that left the process group cannot
-    hold it up. The pipes are then closed rather than drained to EOF for the
-    same reason: a descendant still holding one open would keep the call alive
-    for exactly the run the timeout exists to stop. Nothing is lost by closing
-    them, because whatever the child wrote was taken from the timeout before
-    the kill (see ``_partial_output``).
-    """
-    with contextlib.suppress(Exception):
-        proc.wait(timeout=5)
-    for stream in (proc.stdout, proc.stderr):
-        if stream is not None:
-            with contextlib.suppress(Exception):
-                stream.close()
-
-
-def _timeout_error(timeout_seconds: float, stdout: str, stderr: str) -> ToolError:
-    """Build the ``ToolError`` the model is given when a run is killed for time.
-
-    The message is the result of the call, so it has to say what happened, that
-    re-running the same code will hit the same wall, and what to do instead --
-    the run that was cut off cannot answer that for itself.
-    """
-    parts = [
-        f"TIMEOUT: the code did not finish within {timeout_seconds:g}s and was killed "
-        "(with every process it started).",
-        "There is no exit code and no complete output: treat the run as unfinished, not as failed code.",
-        "Do not re-run the same code unchanged. Anything that may take longer belongs "
-        "in the background: start it detached and return at once, then check it in a "
-        "later call. For example:",
-        "    subprocess.Popen([sys.executable, 'job.py'], stdout=open('/tmp/job.log', 'w'),"
-        " stderr=subprocess.STDOUT, start_new_session=True)",
-        "then read /tmp/job.log (or check the pid) in the next tool call.",
-    ]
-    if stdout.strip() or stderr.strip():
-        parts.append("[output written before the kill -- incomplete]")
-        for name, text in (("stdout", stdout), ("stderr", stderr)):
-            if text.strip():
-                parts.append(f"[{name}]")
-                parts.extend(f"  {line}" for line in text.rstrip().splitlines())
-    return ToolError(error="\n".join(parts))
-
-
-def execute_python(
-    code: str,
-    *,
-    timeout: float = DEFAULT_TOOL_TIMEOUT,
-) -> ExecResult | ToolError:
+def execute_python(code: str) -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
     The child is started in its own session (``start_new_session=True``), so a
@@ -258,19 +186,11 @@ def execute_python(
     interrupt is then re-raised, so the prompt comes back with nothing left
     running in the background.
 
-    The run is limited to ``timeout`` seconds (``DEFAULT_TOOL_TIMEOUT``: 30
-    seconds). A run that outlives it is killed -- with everything it spawned --
-    and the timeout comes back as a :class:`ToolError`, which is what the model
-    is told: a tool call blocks the turn, so a runaway script has to end it
-    rather than hang it. Anything that legitimately takes longer is meant to be
-    started in the background, and the tool description says so.
-
-    The deadline is the *whole* call's, not the code's: nothing after it -- the
-    kill, the reap, reading what the code had already written -- waits on the
-    child or on anything the child started, so a run cut off at ``timeout`` is
-    reported at ``timeout`` and not a moment later.
-
-    Ctrl+C still ends a run early, whatever the remaining time.
+    The run has no time limit: the call returns when the code does, however long
+    that takes. Ctrl+C is what ends a run early, and it takes down the whole
+    process group before the interrupt goes on to the caller. A tool call
+    therefore blocks the turn for as long as the code runs, which is why work
+    that is not needed right away is better started in the background.
 
     Code that calls ``subprocess`` with ``shell=True`` and an argv list is
     refused before anything runs (see ``_check_shell_true_with_list``), because
@@ -278,10 +198,9 @@ def execute_python(
 
     Args:
         code: The Python code to execute.
-        timeout: Seconds the code may run before it is killed.
 
     Returns:
-        ExecResult on completion, ToolError on failure (timeout included).
+        ExecResult on completion, ToolError on failure.
 
     Raises:
         KeyboardInterrupt: If the user interrupts the execution (Ctrl+C).
@@ -317,33 +236,17 @@ def execute_python(
             # either -- the code keeps running while the CLI is suspended.
             start_new_session=True,
         )
-        stdout, stderr = proc.communicate(timeout=timeout)
+        stdout, stderr = proc.communicate()
         return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
-    except subprocess.TimeoutExpired as deadline:
-        # The deadline is the call's, so nothing after this point waits on the
-        # code again: what it wrote comes out of the exception, the group is
-        # killed, and the child is reaped -- each of those is bounded by the
-        # parent, never by what the child or its descendants are doing. (Waiting
-        # for the pipes to close here would hand the run its time back: a
-        # descendant that called ``setsid()`` holds them open as long as it
-        # likes, and five seconds of that made a 30-second timeout take 35.)
-        stdout, stderr = _partial_output(deadline)
-        if proc is not None:
-            # Take the process group down first: the child may be blocked in a
-            # way that outlives a signal to the child alone (it is waiting on a
-            # grandchild, say), and anything it spawned would otherwise keep
-            # running after the model has been told the run ended.
-            _kill_process_group(proc)
-            _reap_killed_process(proc)
-        return _timeout_error(timeout, stdout, stderr)
     except KeyboardInterrupt:
-        # Kill the child and everything it spawned, reap it, then let the
-        # interrupt continue to the caller (the session loop silently returns
-        # to the prompt).
+        # Kill the child and everything it spawned, then let the interrupt
+        # continue to the caller (the session loop silently returns to the
+        # prompt). Waiting for the child here only waits for a process that has
+        # just been SIGKILLed, so it cannot hold the prompt back.
         if proc is not None and proc.poll() is None:
             _kill_process_group(proc)
             with contextlib.suppress(Exception):
-                proc.wait(timeout=5)
+                proc.wait()
         raise
     except Exception as e:
         if proc is not None and proc.poll() is None:
@@ -370,14 +273,14 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
     "required": ["code"],
 }
 
-PYTHON_TOOL_DESCRIPTION = f"""\
+PYTHON_TOOL_DESCRIPTION = """\
 Execute Python code in a subprocess and return stdout/stderr.
 
-The call blocks until the code exits and is limited to {DEFAULT_TOOL_TIMEOUT} seconds.
-Long-running work must not be run in the foreground: start it in the background
-as a detached process (subprocess.Popen(..., start_new_session=True) with its
-output written to a file) and return immediately, then check the file, the pid
-or a result later in another call. A run that reaches the limit is killed,
-together with every process it started, and the timeout is returned as this
-call's result -- nothing keeps running for you afterwards.
+The call blocks until the code exits, with no time limit: it returns when the
+run does. Print what you need as you go, and keep a run short enough that the
+turn does not have to wait on it longer than necessary. Work that is not needed
+right away is better started in the background: start it detached
+(subprocess.Popen(..., start_new_session=True) with its output written to a
+file) and return immediately, then check the file, the pid or a result in a
+later call.
 """

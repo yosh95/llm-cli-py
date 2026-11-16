@@ -574,7 +574,7 @@ def test_the_duration_is_recorded_but_never_sent_to_the_model(tmp_path: Path) ->
             self.body: dict = {}
             self.api_key = ""
 
-        def __call__(self, _url: str, body: dict, _timeout: int, *, api_key: str = "") -> dict:
+        def __call__(self, _url: str, body: dict, *, api_key: str = "") -> dict:
             self.body = body
             self.api_key = api_key
             return completion("first").copy()

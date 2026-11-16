@@ -19,7 +19,6 @@ from prompt_toolkit import PromptSession
 from . import __version__
 from .consts import (
     DEFAULT_API_URL,
-    DEFAULT_REQUEST_TIMEOUT,
     ENV_API_KEY,
     ENV_API_URL,
     ENV_LOG_FILE,
@@ -195,12 +194,10 @@ def main() -> None:
     tool_registry = initialize_tools()
 
     # ── Initialize LLM client and run session ────────────────────────
-    # Built-in request timeout is used (no CLI flag / env override).
     client = LlmApiClient(
         model=model,
         api_url=api_url,
         api_key=api_key,
-        timeout=DEFAULT_REQUEST_TIMEOUT,
         timer_factory=clock.timer,
     )
     ctx = SessionContext(
