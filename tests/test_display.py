@@ -525,6 +525,111 @@ def test_a_tool_error_result_is_red_too(terminal) -> None:
     assert "Error: API limit exceeded" in terminal.text
 
 
+def test_a_long_output_line_is_folded_at_the_terminal_width() -> None:
+    """The end of a tool's output stays on screen instead of running off the edge.
+
+    A tool writes whatever it writes -- a payload, a traceback, one long JSON
+    object -- and a terminal asked to fold the line does so at column zero, which
+    also drops the indentation that says which label the row belongs under.
+    """
+    out = capture(terminal=True, width=60)
+    line = "value=" + "a" * 200 + "END"
+
+    display.print_tool_result(ExecResult(stdout=line + "\n"))
+
+    text = out.text
+    assert "\u2026" not in text  # nothing was cut
+    rows = text.splitlines()
+    assert max(cell_len(row) for row in rows) <= 60
+    # Every row is still indented under ``[stdout]``, and the whole line is there.
+    assert all(row.startswith("      ") for row in rows[rows.index("    [stdout]") + 1 :])
+    assert "".join(row.strip() for row in rows[4:]) == line
+
+
+def test_a_long_output_line_wraps_a_wide_character_line_without_overrunning() -> None:
+    """Japanese takes two columns per character, and is folded on that basis."""
+    out = capture(terminal=True, width=40)
+    line = "結果: " + "日本語の出力が長い場合の折り返しを確認する。" * 4
+
+    display.print_tool_result(ExecResult(stdout=line + "\n"))
+
+    rows = out.text.splitlines()
+    assert max(cell_len(row) for row in rows) <= 40
+    # Every character is still there, in order: the fold adds rows, never or
+    # removes a character.
+    assert "".join(row[6:] for row in rows[4:]) == line
+
+
+def test_a_folded_error_stays_red_on_every_row() -> None:
+    """The colour is the outcome; a folded row is still part of that failure."""
+    out = capture(terminal=True, width=40)
+
+    display.print_tool_result(ToolError(error="API limit exceeded by " * 6))
+
+    rows = out.raw.splitlines()
+    error_rows = [row for row in rows if "API limit" in row or "exceeded by" in row]
+    assert len(error_rows) > 1  # it really was folded
+    assert all("31m" in row for row in error_rows)  # red, every row of it
+
+
+def test_a_long_one_line_argument_is_folded_under_its_value() -> None:
+    """A call's argument is folded under the value, in the room the ``[name]`` leaves.
+
+    The label heads the argument; the continuation is the argument, so it starts
+    where the value started rather than under the label.
+    """
+    out = capture(terminal=True, width=50)
+    value = "print('" + "a" * 120 + "')"
+
+    display.print_tool_call("execute_python", {"code": value})
+
+    rows = out.text.splitlines()
+    start = rows.index("Args:")
+    argument_rows = rows[start + 1 :]
+    assert len(argument_rows) > 1  # it really was folded
+    # It starts on the label's line and continues under the value.
+    assert argument_rows[0].startswith("  [code] print('")
+    assert all(row.startswith("         ") for row in argument_rows[1:])
+    assert max(cell_len(row) for row in rows) <= 50
+    assert "".join(row.strip() for row in argument_rows) == "[code] " + value
+
+
+def test_a_terminal_too_narrow_to_fold_keeps_the_labels_whole() -> None:
+    """Below a certain width there is no row to fold into: the labels stay as they are.
+
+    ``Exit code: 0`` is twelve columns and ``[stdout]`` ten. Folding them onto
+    four-column rows would put the label itself in pieces, which is worse than
+    the terminal folding the one long output line on its own.
+    """
+    out = capture(terminal=True, width=20)
+
+    display.print_tool_result(ExecResult(stdout="hello " + "world " * 20 + "\n"))
+
+    rows = out.text.splitlines()
+    assert "    Exit code: 0" in rows
+    assert "    [stdout]" in rows
+
+
+def test_tabs_in_output_are_expanded_before_the_fold() -> None:
+    """A tab is one character and eight columns; the fold has to count the eight."""
+    out = capture(terminal=True, width=30)
+
+    display.print_tool_result(ExecResult(stdout="col1\tcol2\tcol3\tvalue\n"))
+
+    rows = out.text.splitlines()
+    assert "\t" not in out.text
+    assert max(cell_len(row) for row in rows) <= 30
+
+
+def test_a_long_output_line_is_left_whole_for_a_file(plain) -> None:
+    """A file has no width to fold to, and its text has to stay greppable."""
+    line = "value=" + "a" * 200 + "END"
+
+    display.print_tool_result(ExecResult(stdout=line + "\n"))
+
+    assert plain.text.splitlines()[4:] == ["      " + line]
+
+
 # ── The status line ───────────────────────────────────────────────
 
 

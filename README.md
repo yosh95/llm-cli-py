@@ -283,7 +283,9 @@ where it helps. In a terminal:
   next one instead of being cut at the right edge, so the URL a script fetches
   and the arguments after it stay readable;
 - a tool result is **coloured by outcome**: a green `Exit code: 0`, a red failed
-  one, `[stdout]`/`[stderr]` as labels;
+  one, `[stdout]`/`[stderr]` as labels -- and a line of its output that is wider
+  than the terminal is folded onto the next row under the same label instead of
+  running past the right edge, so the end of a long payload stays readable;
 - `NO_COLOR=1` turns the colours off (the usual convention, and `rich` honours
   it).
 

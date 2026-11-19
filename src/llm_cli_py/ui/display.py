@@ -74,6 +74,15 @@ LIVE_REFRESH_PER_SECOND = 10
 CODE_INDENT = "    "
 """Indentation of a multi-line argument's value, and of code shown under a label."""
 
+MIN_FOLD_WIDTH = 16
+"""The fewest columns there must be left to fold a tool's output into.
+
+Below it there is no row to fold onto: the labels (``Exit code: 0`` is twelve
+columns, ``[stdout]`` ten) would be broken up themselves, and the output would
+arrive as fragments of words. A terminal that narrow is left to wrap the line
+itself, which loses nothing and keeps the labels whole.
+"""
+
 _clock = Clock()
 """The clock stamps and durations are read from -- one per run.
 
@@ -314,11 +323,13 @@ def print_tool_call(name: str, arguments: dict[str, object]) -> None:
         # one-line code stay on a single ``[name] value`` line.
         value_lines = text.rstrip("\n").split("\n")
         if len(value_lines) == 1:
-            line = Text()
-            line.append("  ")
+            label_text = f"[{arg_name}] "
+            line = Text("  ")
             line.append(f"[{arg_name}]", style="cyan")
             line.append(f" {value_lines[0]}")
-            _print(line)
+            # A folded value continues under the value, not under the label:
+            # what is being read is the argument, and the label is its heading.
+            _print_folded(line, continued="  " + " " * cell_len(label_text))
             continue
 
         _print(Text(f"  [{arg_name}]", style="cyan"))
@@ -369,6 +380,10 @@ def print_tool_result(result: ToolResult) -> None:
     in green or red, ``[stdout]``/``[stderr]`` as labels, and the output itself
     indented under each. A failed result is red from its first line, so the
     outcome is visible without reading the block.
+
+    A line longer than the terminal is folded onto the next row rather than run
+    off the right edge (see :func:`_print_folded`): a tool's output is the thing
+    the reader came for, and half of it is not a transcript.
     """
     print_rule()
     ok = result.ok
@@ -378,7 +393,126 @@ def print_tool_result(result: ToolResult) -> None:
     lines = result.as_display_lines()
     for line in lines:
         style = _result_line_style(line, ok)
-        _print(Text(CODE_INDENT + line, style=style) if style else Text(CODE_INDENT + line))
+        _print_folded(Text(CODE_INDENT + line, style=style) if style else Text(CODE_INDENT + line))
+
+
+def _print_folded(line: Text, *, continued: str = "") -> None:
+    """Print one line, folded at the console width on a terminal.
+
+    A tool's output line can be arbitrarily long -- a serialised payload, a
+    traceback, one JSON object -- and a terminal left to fold it does so at
+    column zero, mid-word and mid-wide-character, with the indentation that says
+    which label (``[stdout]``, ``[stderr]``) it belongs under gone on the
+    continuation rows. Folding here keeps every row inside the width and every
+    row under its label, which is the same reasoning that wraps the answer's
+    Markdown and the code of a call. A one-line argument of a call is folded the
+    same way, under its ``[name]``.
+
+    The break is at the last space that fits where there is one, and between
+    characters where there is not: output is mostly not prose (a hash, a base64
+    blob, a path), and a run with nowhere to break has to continue on the next
+    row rather than run past the edge. See :func:`_fold_offsets`.
+
+    A stream nobody is watching keeps the line as it arrived: a file has no width
+    to fold to, an output redirected to it has to stay greppable, and folded text
+    would no longer be the text the tool wrote.
+    """
+    if not _is_terminal():
+        _print(line)
+        return
+
+    # Tabs are expanded first: a tab is one character but however many columns
+    # it takes to reach the next tab stop, and the console would expand it after
+    # the fold had already counted it as nothing. Tab-separated output is common
+    # enough (a table, a tab in a log line) that it must not be the way a row
+    # overruns the width.
+    line = line.copy()
+    line.expand_tabs()
+
+    # The line arrives already indented under its label, and the fold happens in
+    # the width that is left. The continuation rows go under ``continued`` --
+    # the indentation of the line itself by default, or the label's width when
+    # the caller wants them to line up under the value rather than under the
+    # label.
+    plain = line.plain
+    indent = plain[: len(plain) - len(plain.lstrip(" "))]
+    body = line[len(indent) :]
+    first_width = _term_width() - cell_len(indent)
+    continued = continued or indent
+    width = _term_width() - cell_len(continued)
+    if min(width, first_width) < MIN_FOLD_WIDTH:
+        _print(line)
+        return
+
+    offsets = _fold_offsets(body.plain, width, first_width=first_width)
+    if not offsets:
+        # It fits: written as it arrived, no row rebuilt.
+        _print(line)
+        return
+    for number, piece in enumerate(body.divide(offsets)):
+        row = Text(indent if number == 0 else continued)
+        row.append_text(piece)
+        _print(row)
+
+
+def _fold_offsets(plain: str, width: int, *, first_width: int | None = None) -> list[int]:
+    """Return the character indices at which ``plain`` is broken to fit ``width``.
+
+    A row ends after the last space that fits, so prose is broken between words.
+    A word too long to fit on a row of its own -- a hash, a URL, a base64 blob, a
+    path, a whole expression -- is filled to the edge of the row it is on and
+    continued on the next, because the part past the edge is the part a reader
+    needs. The space a break lands on ends the row it is on rather than being
+    swallowed, so the text keeps every character it arrived with, and a wide
+    character that does not fit moves whole to the next row instead of being
+    split across two.
+
+    ``first_width`` is the room the first row has when it differs from the rest:
+    a one-line argument starts after its ``[name]`` and continues under it, in
+    the narrower width that the label leaves.
+    """
+    offsets: list[int] = []
+    start = 0
+    length = len(plain)
+    while start < length:
+        row_width = first_width if first_width is not None and not offsets else width
+        used = 0
+        index = start
+        last_space = -1
+        while index < length:
+            cells = cell_len(plain[index])
+            if used + cells > row_width:
+                break
+            used += cells
+            if plain[index] == " ":
+                last_space = index
+            index += 1
+        if index >= length:
+            break  # what is left fits, so there is nothing more to break
+        if index == start:
+            index += 1  # a character wider than a whole row still has to pass
+        elif last_space >= start and _word_ends_within(plain, last_space + 1, width):
+            index = last_space + 1  # break between words, keeping the space
+        offsets.append(index)
+        start = index
+    return offsets
+
+
+def _word_ends_within(plain: str, start: int, width: int) -> bool:
+    """Whether the word at ``start`` ends -- at a space or the end -- within ``width``.
+
+    A word that does not is longer than a row of its own, and breaking before it
+    would leave the rest of the row empty and push the long word onto a row where
+    it still does not fit.
+    """
+    used = 0
+    for char in plain[start:]:
+        if char == " ":
+            return True
+        used += cell_len(char)
+        if used > width:
+            return False
+    return True
 
 
 def _result_line_style(line: str, ok: bool) -> str:
