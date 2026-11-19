@@ -10,10 +10,12 @@ from typing import TypedDict
 class Role(StrEnum):
     """Message role enum matching OpenAI format.
 
-    Only roles the CLI itself produces are listed: a system message is never
-    sent, so there is no role for one.
+    Only roles the CLI itself produces are listed. ``SYSTEM`` is the one the CLI
+    writes for you: it is the ``LLM_CLI.md`` project instructions, seeded ahead
+    of the first turn (see ``project_file``) and never produced by a turn.
     """
 
+    SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"

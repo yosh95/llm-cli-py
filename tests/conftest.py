@@ -19,9 +19,13 @@ from llm_cli_py.tools.types import ExecResult
 TEST_URL = "https://api.example.invalid/v1"
 
 
-def make_client(model: str = "m", api_key: str = "k") -> LlmApiClient:
-    """Build a client against a fake URL (nothing is sent until ``send``)."""
-    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key)
+def make_client(model: str = "m", api_key: str = "k", instructions: str = "") -> LlmApiClient:
+    """Build a client against a fake URL (nothing is sent until ``send``).
+
+    ``instructions`` stands in for what ``LLM_CLI.md`` supplied: empty (the
+    default) is a client with no system message.
+    """
+    return LlmApiClient(model=model, api_url=TEST_URL, api_key=api_key, instructions=instructions)
 
 
 def completion(text: str | None = None, tool_calls: list[dict] | None = None) -> dict:

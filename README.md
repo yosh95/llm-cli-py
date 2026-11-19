@@ -14,6 +14,10 @@ Python-execution tool.
 - **No provider lock-in** — capabilities are described in the prompt, so the
   agent calls APIs itself via `execute_python`; switch providers by editing an
   env var
+- **`LLM_CLI.md`** — a file in the directory you run it in (or in a parent of
+  it) is read at startup and sent as the conversation's system message, the way
+  Claude Code reads `CLAUDE.md`: standing instructions for the project, with no
+  flag to type and no env var to set
 - **Interactive session** — a rich `> ` prompt powered by `prompt_toolkit`, one turn
   per line, kept open until you end it (Ctrl+D); a prompt on the command line is
   answered first, then the same prompt continues. `prompt_toolkit`'s own key
@@ -103,6 +107,11 @@ Summarize this`. Read any file yourself with a shell
 substitution (`"$(cat file)"`) or, for larger work, let the agent read it with
 `execute_python`.
 
+The prompt is not the only thing the request carries: when the directory has an
+`LLM_CLI.md`, its text is the conversation's system message and goes ahead of
+this prompt (see [Project Instructions](#project-instructions-llm_climd)).
+`-s` itself stays a pure text channel either way.
+
 There is no stdin piping: input is read from the terminal by `prompt_toolkit` (a
 pipe is not a source of turns), and every line you type at the `> ` prompt is
 sent to the model as a new turn. The one exception is `/raw` (below), which
@@ -161,6 +170,9 @@ you the Markdown, tables and fences included:
   `/raw please`, `/rawx` or `raw` are prompt text and are sent to the model.
 - **No other change.** `/raw` is not a turn: nothing is sent, nothing is
   recorded, and the `LLM_CLI_LOG_FILE` log is left exactly as it was.
+- **The system message is in it.** When `LLM_CLI.md` supplied project
+  instructions, they are the first section (`## system`), because they are the
+  first thing the model was sent.
 - **Long lines are not broken.** The text is written as it arrived and the
   terminal folds what does not fit on one screen line, so a long paragraph is
   still one line in the paste. (A terminal that wraps *and* re-indents what it
@@ -307,9 +319,58 @@ the answer the model wrote. Markup characters in a model's or a tool's own text
 | `LLM_CLI_LOG_FILE` | File every conversation is logged to as JSON, tool calls and tool results included. Each run is added to it as a new session, so earlier runs survive a restart (they are never loaded back into the conversation). Unset (the default) writes no log at all. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
 
-There is no system prompt: the CLI sends no system message, so the first request
-of a run carries the user's own turn and nothing before it. Anything the agent
-needs to know is written into the prompt itself (`-s` / positional arguments).
+Only paths are configured by env var here: the project instructions are the
+`LLM_CLI.md` file the run finds on disk (see
+[Project Instructions](#project-instructions-llm_climd)), and there is no
+variable that would point somewhere else instead.
+
+There is no `LLM_CLI_SYSTEM_PROMPT` variable: the system message, when there is
+one, is the project's `LLM_CLI.md` (below). Nothing else is injected, and with no
+such file the first request of a run carries the user's own turn and nothing
+before it. A one-off instruction belongs in the prompt itself (`-s` / positional
+arguments).
+
+### Project Instructions: `LLM_CLI.md`
+
+Put an `LLM_CLI.md` in the directory you run the CLI in and it is loaded
+automatically -- no flag, no env var. It is this CLI's `CLAUDE.md`: the place for
+what is true of *this* project rather than of this request, such as the command
+that runs the tests, the files not to touch, or how answers should be written.
+
+```markdown
+<!-- ~/work/myproject/LLM_CLI.md -->
+- Run `make check-all` before saying a change is done.
+- The generated files under `src/gen/` are not edited by hand.
+- Answer in Japanese, with the code and paths as they are.
+```
+
+```bash
+cd ~/work/myproject
+llm-cli-py -m gpt-4o            # "Loading project instructions from .../LLM_CLI.md"
+```
+
+- **It is the system message.** The file is read once at startup and becomes the
+  conversation's first message, with role `system`, ahead of every user turn
+  (`-s` and the typed prompt alike) and sent again with each request. It is not
+  merged into the first prompt: standing instructions are not a request, and a
+  model treats a system message and a user turn differently.
+- **The nearest file wins.** The current directory is checked first, then each
+  parent up to the root, so running in `myproject/src/` still finds
+  `myproject/LLM_CLI.md`. Exactly one file is used, and it is read once -- a run
+  does not pick up edits made while it is open (start a new run for that).
+- **No file, no message.** With no `LLM_CLI.md` anywhere above the directory,
+  the conversation starts empty and the first request carries only your turn. An
+  empty (or whitespace-only) file is the same as no file.
+- **It is part of the conversation, so you can see it.** `/raw` shows it as the
+  first section, and it is the opening record of the run in the `LLM_CLI_LOG_FILE`
+  log. A turn that is discarded (a broken tool call, an interrupted tool run) is
+  rolled back down to it -- the instructions are never discarded.
+- **Read once, and bounded.** A file larger than 64,000 characters is cut at a
+  line boundary and the truncation is reported: the text is sent with *every*
+  request, so a file that has grown into a data dump would quietly eat the
+  model's context.
+- **A file that cannot be read is reported and skipped**, and the session
+  carries on without it.
 
 ### Writing Paths in the Environment
 
@@ -362,14 +423,16 @@ started at:
 The sessions already in the file are read once at startup and written back
 unchanged beside the current one. Reading them is all that happens to them:
 **nothing from the log is loaded into the conversation**, so every run starts
-empty and the model never sees a previous session's context. The file is where a
-past run is looked up afterwards, not where the next one picks up.
+from its `LLM_CLI.md` alone (or empty) and the model never sees a previous
+session's context. The file is where a past run is looked up afterwards, not
+where the next one picks up.
 
 Because the file only grows, a long-lived path is worth a look now and then (or
 split by day: `LLM_CLI_LOG_FILE=~/logs/$(date +%F).json`, expanded by the shell).
 A version 1 or 2 file -- one session at the top level -- is still read, and its
 session is carried over as the first entry (`started_at` null: that run's start
-was never recorded).
+was never recorded). A `system` record in an older file (from when the CLI read
+`LLM_CLI_SYSTEM_PROMPT`) is carried over exactly as it stands.
 
 Within a session, the file is rewritten as the conversation grows, so what is on
 disk is always that session as it stood, including after a run that ends badly: a
@@ -422,9 +485,10 @@ The key is available in the environment variable WEB_SEARCH_API_KEY.'
 ```
 
 The prompt is a turn like any other, so it is part of the conversation and shows
-up in `/raw` and in the log. To keep a standing instruction, put it in the first
-line of every run (or in a shell function that passes it as `-s`). Prefer
-referencing the key by env var name (as above), not by value.
+up in `/raw` and in the log. For an instruction that should stand for the whole
+project, put it in `LLM_CLI.md` instead: it is sent as the system message, and
+nothing has to be typed at startup. Prefer referencing the key by env var name
+(as above), not by value.
 
 ## Tools
 
