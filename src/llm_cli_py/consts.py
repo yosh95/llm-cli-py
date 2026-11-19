@@ -25,7 +25,8 @@ the conversation as it stood.
 
 The file accumulates across runs: each run is one entry in its ``sessions``
 array, so starting the CLI again adds a session rather than replacing the file.
-Nothing in it is read back into the conversation, so a new run starts empty.
+Nothing in it is read back into the conversation, so a new run starts from its
+project instructions (``LLM_CLI.md``) alone.
 """
 
 ENV_PROMPT_HISTORY_FILE = "LLM_CLI_PROMPT_HISTORY_FILE"

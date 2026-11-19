@@ -92,6 +92,55 @@ def test_main_exits_without_api_url(capsys, monkeypatch) -> None:
     assert "LLM_CLI_API_URL" in capsys.readouterr().out
 
 
+def test_main_loads_llm_cli_md_as_the_system_message(tmp_path, monkeypatch, capsys) -> None:
+    """The composition root is what reads the file: startup, once, before any turn.
+
+    ``LLM_CLI.md`` needs no flag and no env var -- being in the directory is what
+    makes it apply -- so the check is that ``main`` finds it there and hands it
+    to the client as the conversation's first message.
+    """
+    from llm_cli_py import main as main_module
+
+    (tmp_path / "LLM_CLI.md").write_text("Run make check.\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_CLI_API_URL", "https://api.example.invalid/v1")
+    monkeypatch.setattr("sys.argv", ["llm-cli-py", "-m", "gpt-4o"])
+
+    seen: list[str] = []
+
+    def _run(session, *_args, **_kwargs):
+        seen.extend(f"{m.role.value}: {m.content}" for m in session.client.state.conversation)
+
+    monkeypatch.setattr(main_module, "run_interactive", _run)
+    monkeypatch.setattr(main_module, "_prompt_session_or_none", lambda: None)
+
+    main_module.main()
+
+    assert seen == ["system: Run make check.\n"]
+    assert "LLM_CLI.md" in capsys.readouterr().out
+
+
+def test_main_without_llm_cli_md_starts_the_conversation_empty(tmp_path, monkeypatch) -> None:
+    """No file means no system message: the first turn is the user's own."""
+    from llm_cli_py import main as main_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_CLI_API_URL", "https://api.example.invalid/v1")
+    monkeypatch.setattr("sys.argv", ["llm-cli-py", "-m", "gpt-4o"])
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        main_module,
+        "run_interactive",
+        lambda session, *_a, **_k: seen.extend(session.client.state.conversation),
+    )
+    monkeypatch.setattr(main_module, "_prompt_session_or_none", lambda: None)
+
+    main_module.main()
+
+    assert seen == []
+
+
 def test_read_prompt_adds_no_newline_after_ctrl_c(capsys) -> None:
     """prompt_toolkit closes the line as it aborts: a newline here would double it."""
     from llm_cli_py.session import interactive as interactive_mod

@@ -12,6 +12,11 @@ parallel, so it cannot drift from what the model was sent.
 The same conversation has a second rendering, :func:`render_markdown`, which is
 what ``/raw`` shows in the terminal: the same messages, laid out as Markdown
 rather than as a document, for copying elsewhere.
+
+What is written is whatever the conversation holds, the system message included:
+when ``LLM_CLI.md`` supplied project instructions, the run's opening record in the
+log is that ``system`` message, and ``/raw`` shows it as the first section like
+any other message the model was sent.
 """
 
 from __future__ import annotations
@@ -109,10 +114,11 @@ _DURATION_LABELS = {
 }
 """Which bucket a measured message's time belongs to: the model's or a tool's.
 
-Keyed by the role's wire name rather than by ``Role``, because a record read from
-a log written by an earlier version may name a role this version does not have
-(a ``system`` entry, from when the CLI still sent one): such a record is simply
-not one of the buckets, instead of failing to be looked up.
+Keyed by the role's wire name rather than by ``Role``, so a record read from a log
+that names a role this version does not have is simply not one of the buckets,
+instead of failing to be looked up. Neither a ``system`` message (the
+``LLM_CLI.md`` instructions) nor a ``user`` turn is measured, so neither has a
+bucket.
 """
 
 

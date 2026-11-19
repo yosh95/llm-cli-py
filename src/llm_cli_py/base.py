@@ -35,19 +35,28 @@ class LlmClient(ABC):
         self,
         model: str,
         *,
+        instructions: str = "",
         timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
-        """Initialize state with an empty conversation.
+        """Initialize state, seeding the project instructions if there are any.
 
-        Nothing is injected ahead of the user's first turn: the CLI sends no
-        system message, so the conversation is exactly the turns that have been
-        exchanged.
+        ``instructions`` (the composition root reads ``LLM_CLI.md`` once at
+        startup and passes what it found) becomes the conversation's system
+        message: the first message, ahead of every user turn, sent with each
+        request. It is supplied by the caller rather than read from the
+        filesystem here, so a client can be built without touching the disk, and
+        it is not re-read per request -- mid-session changes would make later
+        turns inconsistent with earlier ones. Empty means no system message at
+        all, and the conversation is then exactly the turns that were exchanged.
 
         ``timer_factory`` builds the timer each request is measured with, so how
         long the model took is recorded next to what it said. Tests pass a
         scripted timer instead of waiting for a real one.
         """
-        self._state = ClientState(model=model)
+        self._state = ClientState(
+            model=model,
+            conversation=[Message(role=Role.SYSTEM, content=instructions)] if instructions else [],
+        )
         # Nothing is watching unless a log file was configured; see observe.
         self._observer: ConversationObserver | None = None
         self._timer_factory = timer_factory
@@ -85,6 +94,10 @@ class LlmClient(ABC):
         on the next request. The user's own prompt is kept: the question stays in
         the conversation and can simply be asked again. A no-op when no assistant
         message has been recorded (nothing to undo).
+
+        The system message -- the project instructions -- is the one message
+        that is never discarded, whatever else goes: it sits at the head of the
+        conversation, so a turn is undone down to it and no further.
         """
         conversation = self._state.conversation
         for index in range(len(conversation) - 1, -1, -1):

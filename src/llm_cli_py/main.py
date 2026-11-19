@@ -4,6 +4,10 @@ This module is the composition root: it reads the environment, builds the
 client/session/tool graph and hands control to the interactive loop. Component
 configuration (model, API URL/key) is passed in explicitly rather than read from
 ``os.environ`` inside the components themselves.
+
+It is also the one place that looks at the filesystem for what the run starts
+with: ``LLM_CLI.md``, the project's own instructions, is read here (once) and
+handed to the client as the system message.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from datetime import datetime
 
 from prompt_toolkit import PromptSession
 
-from . import __version__
+from . import __version__, project_file
 from .consts import (
     DEFAULT_API_URL,
     ENV_API_KEY,
@@ -156,7 +160,13 @@ def _configure_streams() -> None:
 
 
 def main() -> None:
-    """Main entry point."""
+    """Main entry point.
+
+    One thing is read from the filesystem before anything else is built: the
+    project instructions (``LLM_CLI.md``, see :mod:`llm_cli_py.project_file`),
+    which become the conversation's system message. Nothing else is injected --
+    no other prompt is added to what the user sends.
+    """
     _configure_streams()
     # The session starts here: stamps and durations are read from this clock from
     # now on, so the uptime shown on every rule counts from this moment. The same
@@ -190,6 +200,15 @@ def main() -> None:
     # -s values and trailing words are all prompt text, sent verbatim.
     prompt = build_prompt(args.sources, args.prompt)
 
+    # ── Project instructions (LLM_CLI.md) ──────────────────────────
+    # The nearest LLM_CLI.md from the current directory upwards, read once here:
+    # it becomes the conversation's system message, so it is sent ahead of every
+    # turn without being part of any of them. No file (or an empty one) means no
+    # system message at all.
+    instructions = project_file.load()
+    if instructions is not None:
+        ui_display.report_info(f"Loading project instructions from {instructions.path}")
+
     # ── Initialize tools ───────────────────────────────────────────
     tool_registry = initialize_tools()
 
@@ -198,6 +217,7 @@ def main() -> None:
         model=model,
         api_url=api_url,
         api_key=api_key,
+        instructions=instructions.text if instructions is not None else "",
         timer_factory=clock.timer,
     )
     ctx = SessionContext(

@@ -31,9 +31,10 @@ class LlmApiClient(LlmClient):
         api_url: str,
         api_key: str | None = None,
         *,
+        instructions: str = "",
         timer_factory: Callable[[], Timer] = Timer,
     ) -> None:
-        super().__init__(model, timer_factory=timer_factory)
+        super().__init__(model, instructions=instructions, timer_factory=timer_factory)
         # The one endpoint this client talks to is fixed at construction, so the
         # base URL is never needed again (and a trailing "/" is harmless).
         self._endpoint = api_url.rstrip("/") + "/chat/completions"
@@ -43,7 +44,9 @@ class LlmApiClient(LlmClient):
         """Build the messages array for the API request.
 
         The conversation history is the one and only source of the request body:
-        only fields the API understands are emitted.
+        only fields the API understands are emitted. That includes the system
+        message, when there is one -- the project instructions from ``LLM_CLI.md``
+        -- which the model is sent first, ahead of every turn.
         """
         messages: list[dict[str, object]] = []
 

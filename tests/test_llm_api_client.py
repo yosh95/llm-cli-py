@@ -32,8 +32,8 @@ def test_request_targets_chat_completions_with_the_prompt_and_tools() -> None:
     assert result.text == "Answer"
 
 
-def test_the_conversation_starts_empty_so_nothing_is_sent_ahead_of_the_turn() -> None:
-    """The CLI sends no system message: the first request carries the user turn alone."""
+def test_without_instructions_the_conversation_starts_empty() -> None:
+    """No ``LLM_CLI.md`` means no system message: the first request is the user turn alone."""
     client = make_client()
 
     assert client.state.conversation == []
