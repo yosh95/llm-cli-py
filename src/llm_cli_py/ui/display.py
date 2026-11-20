@@ -291,6 +291,17 @@ def print_assistant(text: str) -> None:
     _print(Text(body))
 
 
+EXPLANATION_ARGUMENT = "explanation"
+"""The argument that says why a call is being made, and is printed last.
+
+``execute_python`` asks for it (the schema has it in ``required``), and the whole
+point of it is the reader: the sentence belongs in the transcript directly after
+the code it is about, where the question "what is this for?" is asked. So the
+argument is held back from the loop below and printed once the code is on screen,
+whatever order the model happened to write the keys in.
+"""
+
+
 def print_tool_call(name: str, arguments: dict[str, object]) -> None:
     """Print a tool invocation and its arguments.
 
@@ -302,6 +313,12 @@ def print_tool_call(name: str, arguments: dict[str, object]) -> None:
     being mangled into one long line. On a terminal such a value is also
     syntax-highlighted -- when an agent shows you the Python it is about to run,
     the code should look like code.
+
+    One argument is deliberately last: ``explanation``, the reason the model
+    gives for the call. It is printed after every other argument -- after the
+    code, for the tool that has one -- because it answers a question a reader has
+    about what is above it, not about what is below it (see
+    :data:`EXPLANATION_ARGUMENT`).
 
     The block is not stamped. It describes a call that has not run yet, and the
     rule that opened it carries the time, so the only clock the call itself needs
@@ -317,23 +334,51 @@ def print_tool_call(name: str, arguments: dict[str, object]) -> None:
 
     _print(_stamped(Text("Args:", style="dim"), with_stamp=False))
     for arg_name, value in arguments.items():
-        text = value if isinstance(value, str) else str(value)
-        # Code is almost always written with a trailing newline; dropping it
-        # first keeps the block from ending on an empty indented line and lets
-        # one-line code stay on a single ``[name] value`` line.
-        value_lines = text.rstrip("\n").split("\n")
-        if len(value_lines) == 1:
-            label_text = f"[{arg_name}] "
-            line = Text("  ")
-            line.append(f"[{arg_name}]", style="cyan")
-            line.append(f" {value_lines[0]}")
-            # A folded value continues under the value, not under the label:
-            # what is being read is the argument, and the label is its heading.
-            _print_folded(line, continued="  " + " " * cell_len(label_text))
-            continue
+        if arg_name == EXPLANATION_ARGUMENT:
+            continue  # printed below, after the code it explains
+        _print_argument(arg_name, value)
 
-        _print(Text(f"  [{arg_name}]", style="cyan"))
+    # An empty (or blank) explanation is not printed: a bare ``[explanation]``
+    # label with nothing under it would only be a gap in the block. A call that
+    # carries none at all ends here, exactly as it did before -- a tool that does
+    # not ask for one, or a call the tool will refuse for the missing sentence
+    # (the refusal is the result printed below, which says what to send instead).
+    explanation = arguments.get(EXPLANATION_ARGUMENT)
+    if explanation is not None and str(explanation).strip():
+        _print_argument(EXPLANATION_ARGUMENT, explanation, code=False)
+
+
+def _print_argument(arg_name: str, value: object, *, code: bool = True) -> None:
+    """Print one argument: ``[name] value`` on a line, or labelled with the value under it.
+
+    A value that spans several lines gets a label of its own and is reproduced
+    underneath (see :func:`print_tool_call`): code is written with its own
+    indentation, and folding it onto one line would lose it. ``code=False`` is
+    for a value that is prose (the call's ``explanation``): a value of several
+    lines is written out as it was typed, indented like code but *not* coloured
+    as if it were Python -- a sentence highlighted as code reads as a mistake.
+    """
+    text = value if isinstance(value, str) else str(value)
+    # Code is almost always written with a trailing newline; dropping it
+    # first keeps the block from ending on an empty indented line and lets
+    # one-line code stay on a single ``[name] value`` line.
+    value_lines = text.rstrip("\n").split("\n")
+    if len(value_lines) == 1:
+        label_text = f"[{arg_name}] "
+        line = Text("  ")
+        line.append(f"[{arg_name}]", style="cyan")
+        line.append(f" {value_lines[0]}")
+        # A folded value continues under the value, not under the label:
+        # what is being read is the argument, and the label is its heading.
+        _print_folded(line, continued="  " + " " * cell_len(label_text))
+        return
+
+    _print(Text(f"  [{arg_name}]", style="cyan"))
+    if code:
         _print_code(text.rstrip("\n"))
+        return
+    for value_line in value_lines:
+        _print_folded(Text(CODE_INDENT + value_line))
 
 
 def _print_code(code: str) -> None:

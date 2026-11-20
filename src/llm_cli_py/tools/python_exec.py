@@ -176,7 +176,7 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
             kill(target, signal.SIGKILL)
 
 
-def execute_python(code: str) -> ExecResult | ToolError:
+def execute_python(code: str, explanation: str = "") -> ExecResult | ToolError:
     """Execute Python code in a subprocess and return the result.
 
     The child is started in its own session (``start_new_session=True``), so a
@@ -198,6 +198,18 @@ def execute_python(code: str) -> ExecResult | ToolError:
 
     Args:
         code: The Python code to execute.
+        explanation: Why this code is being run, written for the user: one
+            short sentence. Required, in the schema and here, because the reason
+            is part of the call rather than optional commentary: the display
+            prints it in the transcript directly after the code, so a reader sees
+            why the script ran and not only that it did. It is empty by default
+            only so that a call arriving without one is refused with a sentence
+            the model can act on, instead of a ``TypeError`` about a signature it
+            cannot see.
+
+            What this function does with it is nothing: the display prints it
+            from the call's own arguments. It is validated here anyway, so the
+            requirement holds whichever layer a call comes through.
 
     Returns:
         ExecResult on completion, ToolError on failure.
@@ -205,6 +217,22 @@ def execute_python(code: str) -> ExecResult | ToolError:
     Raises:
         KeyboardInterrupt: If the user interrupts the execution (Ctrl+C).
     """
+    # A call without a reason is refused before anything runs, with the fix
+    # spelled out -- the same treatment as a shell=True argv list below. The
+    # refusal is a tool result, so the turn survives: the model reads what was
+    # missing, sends the call again with it, and nothing has to be typed twice.
+    if not explanation.strip():
+        return ToolError(
+            error=(
+                "execute_python was NOT run: 'explanation' is missing or empty.\n"
+                "  It is required: one short sentence, written for the user, saying "
+                "why this code has to run --\n"
+                "  it is shown in the transcript right after the code. Send the call "
+                "again with it, e.g.\n"
+                '  {"code": "...", "explanation": "Check which Python version is installed."}'
+            )
+        )
+
     # Refuse subprocess calls whose argv list would be ignored by the shell,
     # rather than running code that does not do what it looks like it does.
     refusal = _check_shell_true_with_list(code)
@@ -269,8 +297,18 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
             "type": "string",
             "description": "The Python code to execute. Use 'print()' for output.",
         },
+        # Second, and required: a call has to say why it is being made, and the
+        # display prints that sentence after the code it explains.
+        "explanation": {
+            "type": "string",
+            "description": (
+                "Why this code has to run, in one short sentence written for the user. "
+                "It is shown in the transcript immediately after the code, so write the "
+                "reason for the call, not a restatement of what the code does."
+            ),
+        },
     },
-    "required": ["code"],
+    "required": ["code", "explanation"],
 }
 
 PYTHON_TOOL_DESCRIPTION = """\
@@ -283,4 +321,9 @@ right away is better started in the background: start it detached
 (subprocess.Popen(..., start_new_session=True) with its output written to a
 file) and return immediately, then check the file, the pid or a result in a
 later call.
+
+Every call also carries an "explanation": one sentence, written for the user,
+saying why this code has to run. It is required, and it is shown in the
+transcript right after the code -- so write the reason for the call rather than
+a description of the code.
 """

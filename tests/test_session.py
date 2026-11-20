@@ -52,6 +52,21 @@ def test_tool_arguments_and_result_are_displayed(session, turn) -> None:
     assert "Tool Result" in out and "Exit code: 0" in out
 
 
+def test_the_call_s_explanation_is_displayed_after_the_code(session, turn) -> None:
+    """The model's reason for the call reaches the transcript, under the code."""
+    register(session.ctx.tool_registry, "calc")
+    call = ToolCall(
+        id="c1",
+        name="calc",
+        arguments={"explanation": "Add the two numbers.", "code": "40+2"},
+    )
+
+    out = turn(tool_then_text(call))
+
+    lines = out.splitlines()
+    assert lines.index("  [code] 40+2") < lines.index("  [explanation] Add the two numbers.")
+
+
 def test_a_slow_tool_reports_how_long_it_ran(session, turn) -> None:
     """The tool's duration is on screen, so a slow tool is not mistaken for a hang."""
 

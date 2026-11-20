@@ -462,6 +462,75 @@ def test_a_call_without_arguments_prints_no_args_block(plain) -> None:
     assert "Args:" not in plain.text
 
 
+def test_the_explanation_is_printed_after_the_code(plain) -> None:
+    """The reason comes last: it is about the code above it, not about what follows.
+
+    Models write the keys in whatever order they like, so the order on screen is
+    the display's, not the payload's -- ``explanation`` first here.
+    """
+    display.print_tool_call(
+        "execute_python",
+        {"explanation": "Check which Python version is installed.", "code": "import sys"},
+    )
+
+    assert "  [code] import sys" in plain.text.splitlines()
+    lines = plain.text.splitlines()
+    assert lines[-1] == "  [explanation] Check which Python version is installed."
+    assert lines.index("  [code] import sys") < len(lines) - 1
+
+
+def test_the_explanation_follows_multi_line_code(plain) -> None:
+    """A block of code is still followed by its reason, not preceded by it."""
+    code = "def f():\n    return 1"
+
+    display.print_tool_call("execute_python", {"explanation": "Define f.", "code": code})
+
+    assert plain.text.splitlines()[3:] == [
+        "  [code]",
+        "    def f():",
+        "        return 1",
+        "  [explanation] Define f.",
+    ]
+
+
+def test_the_explanation_is_kept_out_of_the_code_block_order(plain) -> None:
+    """Whatever order the keys arrive in, ``explanation`` is printed once, last."""
+    display.print_tool_call(
+        "execute_python",
+        {"code": "print(1)", "explanation": "Print one.", "note": "x"},
+    )
+
+    lines = plain.text.splitlines()
+    assert lines[3:] == ["  [code] print(1)", "  [note] x", "  [explanation] Print one."]
+
+
+def test_a_multi_line_explanation_is_written_as_prose_not_highlighted_code(terminal) -> None:
+    """It is a sentence: indented like the code block, but not coloured as Python."""
+    display.print_tool_call(
+        "execute_python",
+        {"code": "print(1)", "explanation": "First line.\nSecond line."},
+    )
+
+    assert terminal.text.splitlines()[3:] == [
+        "  [code] print(1)",
+        "  [explanation]",
+        "    First line.",
+        "    Second line.",
+    ]
+    # The prose is untouched by the syntax highlighter: no colour inside it.
+    explanation_rows = terminal.raw.splitlines()[-2:]
+    assert all("\x1b[38;5;" not in row for row in explanation_rows)
+
+
+@pytest.mark.parametrize("arguments", [{"code": "print(1)"}, {"code": "print(1)", "explanation": "  "}])
+def test_a_call_without_a_usable_explanation_ends_with_its_arguments(plain, arguments) -> None:
+    """An absent or blank reason prints nothing: no stray label, no gap in the block."""
+    display.print_tool_call("execute_python", arguments)
+
+    assert "[explanation]" not in plain.text
+    assert plain.text.splitlines()[-1] == "  [code] print(1)"
+
+
 def test_code_is_highlighted_on_a_terminal_but_not_in_a_file(plain, terminal) -> None:
     """An agent showing the Python it is about to run should show it as code."""
     code = "def f():\n    return 1"

@@ -30,6 +30,10 @@ Python-execution tool.
 - **Readable output** — answers are rendered as Markdown, code in a tool call is
   syntax-highlighted, results are coloured by outcome: on a terminal only, so a
   redirected transcript stays plain text
+- **A reason for every tool call** — the model has to send an `explanation`
+  with `execute_python` (the schema requires it, and the tool refuses a call
+  without one), and it is printed right after the code, so the transcript says
+  why the script was run and not just what it was
 - **`/raw`** — type it at the prompt to print the whole conversation as plain
   Markdown instead of the rendered transcript, so the answer can be copied out
   of the terminal with its Markdown intact
@@ -145,7 +149,8 @@ exactly as it stands:
 
 ```json
 {
-  "code": "print(1)"
+  "code": "print(1)",
+  "explanation": "Check that Python runs here."
 }
 ```
 
@@ -240,6 +245,7 @@ gpt-4o is thinking... 2.5s
 [Tool] Executing tool: execute_python...
 Args:
   [code] import time; time.sleep(3); print("done")
+  [explanation] Time a three-second script to see the status line count.
 [Tool] execute_python running... 0.0s
 [Tool] execute_python running... 3.0s
 [09:32:16] ──────────────────────────────────────────────── [+00:00:05]
@@ -497,6 +503,36 @@ subprocess and returns the exit code plus stdout/stderr. Its output is sent back
 to the model, so the agent can read files, call APIs and run commands itself. Tool calls are always
 executed automatically (no approval prompt). The child runs with the same
 environment and file-system access as the CLI itself.
+
+Every call carries two arguments, and the schema marks both as `required`:
+
+| Argument | What it is |
+|---|---|
+| `code` | The Python to run. `print()` what the model needs to see. |
+| `explanation` | One short sentence, written for you, saying why this code has to run. |
+
+The explanation is shown in the transcript **directly after the code** it is
+about, and never inside anything the model controls: the order on screen is the
+display's, not the JSON's, so a call that arrived with `explanation` first still
+reads code-then-reason.
+
+```text
+[Tool] Executing tool: execute_python...
+Args:
+  [code]
+    import pathlib
+    print(len(list(pathlib.Path('src').rglob('*.py'))))
+  [explanation] Count the Python files, to see how big the package is.
+```
+
+The requirement is enforced on both sides. The schema says `required`, so a
+model reading the tool definition knows to send it; and the tool itself refuses a
+call without one *before* the code runs, with the same kind of message it gives
+for a `subprocess(..., shell=True)` list -- what was missing, and what to send
+instead. The refusal is an ordinary tool result, so the turn is not lost: the
+model reads it, sends the call again with the sentence added, and nothing has to
+be retyped. (A `required` key alone is only a hint to the provider; some
+OpenAI-compatible servers pass a call through without checking it.)
 
 A run has **no time limit**: the call returns when the code does, however long
 that takes, and nothing is killed for taking its time. The call blocks the turn,
