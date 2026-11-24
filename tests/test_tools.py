@@ -14,6 +14,7 @@ from llm_cli_py.tools.python_exec import (
 )
 from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult, ToolError
+from llm_cli_py.utils import terminal
 
 
 def test_code_runs_and_stdout_is_captured() -> None:
@@ -133,3 +134,125 @@ def test_registry_registers_looks_up_and_advertises_a_tool() -> None:
     assert registry.get("missing") is None
     assert [s.name for s in registry.get_schemas()] == ["calc"]
     assert tool.schema.description == "Calculate"
+
+
+# ── The child never gets the terminal ─────────────────────────────
+
+
+def test_tool_code_cannot_read_what_the_user_types() -> None:
+    """The child's stdin is not the terminal, so a prompt cannot be answered by it.
+
+    Before this held, code that called ``input()`` read the user's next keystroke
+    out from under the CLI's own prompt: the line typed at ``> `` went to the
+    tool instead of to the model.
+    """
+    result = execute_python(
+        "import sys\ndata = sys.stdin.read(10)\nprint(repr(data))",
+        explanation="Check what the child's stdin is connected to.",
+    )
+
+    assert isinstance(result, ExecResult)
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "''"  # end of input: nothing to read
+
+
+def test_tool_code_reading_stdin_returns_instead_of_waiting_for_a_keypress() -> None:
+    """``input()`` fails at once rather than blocking the turn on a keystroke."""
+    result = execute_python(
+        "try:\n    input('prompt: ')\nexcept EOFError:\n    print('eof')",
+        explanation="Show that a tool cannot wait for the keyboard.",
+    )
+
+    assert isinstance(result, ExecResult)
+    assert result.exit_code == 0
+    assert result.stdout.strip().endswith("eof")  # the prompt came first
+
+
+def test_tool_code_cannot_put_the_terminal_into_raw_mode() -> None:
+    """Without a descriptor on the terminal there is no mode to change.
+
+    A child that could do this left the terminal raw when it exited, and a raw
+    terminal has ``ISIG`` off -- so Ctrl+C stopped being a signal, for the CLI
+    and for the shell after it. ``tty.setraw`` fails here because the child has
+    no terminal at all.
+    """
+    result = execute_python(
+        "import os, tty\ntry:\n    tty.setraw(0)\nexcept Exception as e:\n    print(type(e).__name__)",
+        explanation="Show that a tool has no terminal to change.",
+    )
+
+    assert isinstance(result, ExecResult)
+    # `termios.error` (an OSError) from the ioctl, or ValueError for fd 0 being
+    # /dev/null: either way the terminal is untouched.
+    assert result.stdout.strip() in {"error", "OSError", "ValueError", "TermiosError"}
+
+
+def test_a_tool_run_gives_the_terminal_back_even_if_it_was_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings captured before the run are put back after it, however it ends.
+
+    The child is kept away from the terminal, but the guarantee does not rest on
+    that alone: a run of tool code starts and ends with the same terminal
+    settings, so anything that did manage to change them cannot outlive the
+    call.
+    """
+    calls: list[str] = []
+
+    class _FakeTermios:
+        """Enough of ``termios`` to see what is asked of it."""
+
+        TCSANOW = 0
+        error = OSError
+
+        def __init__(self) -> None:
+            self.state = ["cooked"]
+
+        def tcgetattr(self, _fd: int) -> list[str]:
+            calls.append("get")
+            return list(self.state)
+
+        def tcsetattr(self, _fd: int, _when: int, state: list[str]) -> None:
+            calls.append(f"set {state[0]}")
+            self.state = list(state)
+
+    class _FakeProc:
+        """A child that finishes at once, after leaving the terminal raw."""
+
+        returncode = 0
+
+        def __init__(self) -> None:
+            fake.state = ["raw"]
+            self.kwargs: dict[str, object] = {}
+
+        def communicate(self) -> tuple[str, str]:
+            return "", ""
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self) -> int:
+            return 0
+
+    fake = _FakeTermios()
+    monkeypatch.setattr(terminal, "termios", fake)
+    monkeypatch.setattr(terminal.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(terminal.sys.stdin, "fileno", lambda: 0, raising=False)
+    monkeypatch.setattr(
+        "llm_cli_py.tools.python_exec.subprocess.Popen",
+        lambda *_a, **_k: _FakeProc(),
+    )
+
+    result = execute_python("print('x')", explanation="Run something.")
+
+    assert isinstance(result, ExecResult)
+    assert calls == ["get", "set cooked"]  # captured before, put back after
+    assert fake.state == ["cooked"]
+
+
+def test_no_terminal_means_nothing_to_save_or_restore() -> None:
+    """A redirected stdin is not a terminal: every step is a no-op, never an error."""
+    assert terminal.save() is None  # pytest's stdin is not a tty
+    terminal.restore(None)  # must not raise
+    with terminal.preserved():
+        pass

@@ -539,10 +539,21 @@ that takes, and nothing is killed for taking its time. The call blocks the turn,
 so a script that never ends keeps the turn waiting -- the running timer on the
 status line shows it is still working, and Ctrl+C ends it: the child is killed
 together with every process it spawned, and the prompt comes back with nothing
-left running behind it. The tool description tells the model the same, and that
-work which is not needed right away is better started detached
-(`subprocess.Popen(..., start_new_session=True)` writing to a file) and checked
-in a later call.
+left running behind it.
+
+The child is given **no descriptor on the terminal**: its stdin is `/dev/null`
+and its output arrives over pipes. Tool code therefore cannot read the keys you
+type at the `> ` prompt, and it cannot change the terminal's settings -- a child
+that put the terminal into raw mode used to leave it that way, and a raw terminal
+has `ISIG` off, which means Ctrl+C is no longer a signal for the CLI *or for the
+shell it returns to* (Ctrl+Z does not help either: it is a byte too). To read
+input, put it in the code; to run something with your keyboard, run it yourself.
+As a second line of defence the terminal's settings are captured before the run
+and before the prompt loop, and put back afterwards, however the run ends.
+
+The tool description tells the model the same, and that work which is not needed
+right away is better started detached (`subprocess.Popen(..., start_new_session=True)`
+writing to a file) and checked in a later call.
 
 A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as

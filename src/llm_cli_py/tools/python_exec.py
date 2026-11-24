@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from ..consts import DEFAULT_CHILD_PYTHON
+from ..utils import terminal
 from .types import ExecResult, ToolError
 
 ENV_PYTHON_EXEC = "LLM_CLI_PYTHON_EXEC"
@@ -36,6 +37,22 @@ that fails to decode is worse than one with a stray character in it.
 _CHILD_ERRORS = "replace"
 """How undecodable bytes in the child's output are handled (see above)."""
 
+_CHILD_STDIN = subprocess.DEVNULL
+"""What the child's stdin is opened on: nothing, so it never touches the terminal.
+
+The child used to inherit this process's stdin, and with it the terminal: it
+could read the user's keystrokes out from under the prompt, and it could put the
+terminal into raw mode -- which it then left that way, because tool code has no
+reason to know it changed anything. A raw terminal has ``ISIG`` off, so Ctrl+C
+stops being a signal: neither the CLI nor the shell it returned to reacted to the
+key any more, and Ctrl+Z (a byte too) was no help either.
+
+``DEVNULL`` is an open file, so code that reads stdin sees end-of-input rather
+than an error, and the child holds no descriptor on the terminal at all. That
+last part is what makes the guarantee hold even for a run the CLI ends with
+``SIGKILL``, where the child gets no chance to put anything back -- and none of
+it is needed to run a script, whose input comes from the code, not the keyboard.
+"""
 
 _SHELL_META = {">", "<", "|", "2>&1", "2>", "1>", ">>", "2>>", ";", "&", "`", "$("}
 """Tokens that mean something to a shell but are inert inside an argv list.
@@ -186,6 +203,15 @@ def execute_python(code: str, explanation: str = "") -> ExecResult | ToolError:
     interrupt is then re-raised, so the prompt comes back with nothing left
     running in the background.
 
+    The child is given no descriptor on the terminal (see ``_CHILD_STDIN``): its
+    stdin is ``/dev/null``, and its output arrives over pipes. Tool code
+    therefore cannot read what the user types at the prompt, cannot consume the
+    Ctrl+C meant for the CLI, and cannot leave the terminal in raw mode -- where
+    ``ISIG`` off means Ctrl+C stops being a signal at all, and the CLI (and the
+    shell after it) ignores the key entirely. As a second line of defence the
+    terminal's settings are captured before the run and put back after it,
+    however the run ends (see ``llm_cli_py.utils.terminal``).
+
     The run has no time limit: the call returns when the code does, however long
     that takes. Ctrl+C is what ends a run early, and it takes down the whole
     process group before the interrupt goes on to the caller. A tool call
@@ -245,26 +271,38 @@ def execute_python(code: str, explanation: str = "") -> ExecResult | ToolError:
 
     proc: subprocess.Popen[str] | None = None
     try:
-        # Decode the child's output explicitly as UTF-8, and force the child's
-        # own stdout/stderr to UTF-8 too. The defaults here are the parent's
-        # locale encoding (e.g. cp932 on Japanese Windows), which would either
-        # mangle UTF-8 output or raise UnicodeDecodeError in the reader thread.
-        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-        proc = subprocess.Popen(
-            [_resolve_child_python(), str(tmp_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding=_CHILD_ENCODING,
-            errors=_CHILD_ERRORS,
-            env=env,
-            # Own session = own process group. The terminal's Ctrl+C therefore
-            # skips the executed code, which is killed explicitly below instead;
-            # Ctrl+Z at the prompt, which stops the CLI, does not reach the code
-            # either -- the code keeps running while the CLI is suspended.
-            start_new_session=True,
-        )
-        stdout, stderr = proc.communicate()
+        # Whatever the child does to the terminal -- see ``_CHILD_STDIN`` for why
+        # it should be able to do nothing at all -- the settings the user had are
+        # the ones in force once the run is over, so a stray raw mode cannot
+        # outlive the tool that set it.
+        with terminal.preserved():
+            # Decode the child's output explicitly as UTF-8, and force the
+            # child's own stdout/stderr to UTF-8 too. The defaults here are the
+            # parent's locale encoding (e.g. cp932 on Japanese Windows), which
+            # would either mangle UTF-8 output or raise UnicodeDecodeError in
+            # the reader thread.
+            env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+            proc = subprocess.Popen(
+                [_resolve_child_python(), str(tmp_path)],
+                # The child gets no descriptor on the terminal: it cannot read
+                # the user's keystrokes, and it cannot leave the terminal in a
+                # state the next prompt would take for its own (see
+                # ``_CHILD_STDIN``).
+                stdin=_CHILD_STDIN,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding=_CHILD_ENCODING,
+                errors=_CHILD_ERRORS,
+                env=env,
+                # Own session = own process group. The terminal's Ctrl+C
+                # therefore skips the executed code, which is killed explicitly
+                # below instead; Ctrl+Z at the prompt, which stops the CLI, does
+                # not reach the code either -- the code keeps running while the
+                # CLI is suspended.
+                start_new_session=True,
+            )
+            stdout, stderr = proc.communicate()
         return ExecResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
     except KeyboardInterrupt:
         # Kill the child and everything it spawned, then let the interrupt

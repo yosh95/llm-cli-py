@@ -294,6 +294,59 @@ def test_a_history_path_that_cannot_be_resolved_falls_back_to_memory(capsys, mon
     assert "history" in capsys.readouterr().out
 
 
+def test_the_terminal_is_put_back_when_the_loop_ends(monkeypatch) -> None:
+    """The shell gets the settings the session started with, not whatever it ended in.
+
+    ``prompt_toolkit`` restores what it found when a prompt started, so a
+    terminal something had left raw would keep being put back that way -- and a
+    raw terminal has ``ISIG`` off, which means the shell's own Ctrl+C would stop
+    working. The loop captures the settings before its first prompt and puts
+    them back however it ends.
+    """
+    from llm_cli_py.session import interactive as interactive_mod
+    from llm_cli_py.utils import terminal
+
+    captured = ["cooked"]
+    events: list[str] = []
+
+    monkeypatch.setattr(terminal, "save", lambda: events.append("save") or captured)
+    monkeypatch.setattr(terminal, "restore", lambda state: events.append(f"restore {state[0]}"))
+
+    prompt_session = MagicMock()
+    prompt_session.prompt.side_effect = EOFError
+
+    with patch.object(interactive_mod.ui.display, "print_rule"):
+        interactive_mod.run_interactive(MagicMock(), prompt_session=prompt_session)
+
+    assert events == ["save", "restore cooked"]
+
+
+def test_the_terminal_is_put_back_when_the_loop_is_interrupted(monkeypatch) -> None:
+    """An exception out of the loop still returns the terminal, not just end of input."""
+    from llm_cli_py.session import interactive as interactive_mod
+    from llm_cli_py.utils import terminal
+
+    restored: list[object] = []
+    monkeypatch.setattr(terminal, "save", lambda: ["cooked"])
+    monkeypatch.setattr(terminal, "restore", lambda state: restored.append(state))
+
+    prompt_session = MagicMock()
+    prompt_session.prompt.side_effect = RuntimeError("boom")
+
+    # The loop reports the failure and asks again: end it on the next read.
+    prompt_session.prompt.side_effect = ["do it", EOFError]
+
+    with (
+        patch.object(interactive_mod.ui.display, "print_rule"),
+        patch.object(interactive_mod.ui.display, "report_error"),
+        patch.object(interactive_mod.ui.display, "report_info"),
+        patch.object(interactive_mod, "handle_user_input", side_effect=RuntimeError("boom")),
+    ):
+        interactive_mod.run_interactive(MagicMock(), prompt_session=prompt_session)
+
+    assert restored == [["cooked"]]
+
+
 def test_ctrl_c_during_the_first_turn_returns_to_the_prompt() -> None:
     """The command-line turn is not a prompt: an interrupt there must not end the CLI.
 

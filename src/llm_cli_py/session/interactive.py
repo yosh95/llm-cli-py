@@ -43,6 +43,7 @@ from prompt_toolkit.utils import suspend_to_background_supported
 
 from .. import ui
 from ..consts import ENV_PROMPT_HISTORY_FILE
+from ..utils import terminal
 from ..utils.fileio import clean_path
 from .session import ActiveSession
 from .transcript import render_markdown
@@ -238,37 +239,56 @@ def run_interactive(
             works there too, showing the conversation as it stands.
         prompt_session: Optional prompt_toolkit PromptSession to read input with.
     """
-    # Ctrl+C while the command-line turn is running means the same thing here as
-    # it does in the loop below: the operation is abandoned and the prompt takes
-    # over. Letting it out of the function would end the CLI with a traceback
-    # instead -- this turn came from argv, not from a prompt that was closed.
-    if initial_prompt:
-        with contextlib.suppress(KeyboardInterrupt):
-            handle_user_input(session, initial_prompt)
+    # The settings the terminal has now -- before any prompt, before any turn --
+    # are the ones the shell gets back when the loop ends. ``prompt_toolkit``
+    # restores the raw mode it enters on its own, but what it restores is what it
+    # found when the prompt started: if something had left the terminal raw in
+    # between, every later prompt would dutifully put that state back, and the
+    # shell would inherit a terminal where Ctrl+C is not a signal at all (no
+    # ``ISIG``), Enter does not end a line (no ``ICANON``) and nothing echoes.
+    # Capturing the state here is what makes the CLI unable to hand the shell
+    # such a terminal, whatever happened inside the loop.
+    state = terminal.save()
+    try:
+        # Ctrl+C while the command-line turn is running means the same thing
+        # here as it does in the loop below: the operation is abandoned and the
+        # prompt takes over. Letting it out of the function would end the CLI
+        # with a traceback instead -- this turn came from argv, not from a
+        # prompt that was closed.
+        if initial_prompt:
+            with contextlib.suppress(KeyboardInterrupt):
+                handle_user_input(session, initial_prompt)
 
-    if prompt_session is None:
-        prompt_session = make_prompt_session()
+        if prompt_session is None:
+            prompt_session = make_prompt_session()
 
-    while True:
-        try:
-            ui.display.print_rule()
-            user_input = read_prompt(prompt_session)
+        while True:
+            try:
+                ui.display.print_rule()
+                user_input = read_prompt(prompt_session)
 
-            if not user_input.strip():
+                if not user_input.strip():
+                    continue
+
+                handle_user_input(session, user_input)
+
+            except KeyboardInterrupt:
+                # A stray Ctrl+C returns to the prompt: prompt_toolkit closed
+                # the abandoned line as it aborted, so nothing has to be written
+                # here (Ctrl+C while a request or a tool is running is handled
+                # by that operation). End of input ends the session instead:
+                # Ctrl+D, or Ctrl+Z then Enter on Windows.
                 continue
-
-            handle_user_input(session, user_input)
-
-        except KeyboardInterrupt:
-            # A stray Ctrl+C returns to the prompt: prompt_toolkit closed the
-            # abandoned line as it aborted, so nothing has to be written here
-            # (Ctrl+C while a request or a tool is running is handled by that
-            # operation). End of input ends the session instead: Ctrl+D, or
-            # Ctrl+Z then Enter on Windows.
-            continue
-        except EOFError:
-            break
-        except Exception as e:
-            ui.display.report_error(f"Unexpected error: {e}")
-            ui.display.report_info("The session continues. You can try again.")
-            continue
+            except EOFError:
+                break
+            except Exception as e:
+                ui.display.report_error(f"Unexpected error: {e}")
+                ui.display.report_info("The session continues. You can try again.")
+                continue
+    finally:
+        # However the loop ends -- end of input, an exception, Ctrl+C while the
+        # prompt is not the one handling it -- the shell gets the terminal the
+        # session started with, not whatever state something left it in. (See
+        # the note on ``state`` above: returning a raw terminal would make the
+        # shell's own Ctrl+C stop working.)
+        terminal.restore(state)
