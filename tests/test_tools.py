@@ -71,8 +71,8 @@ def test_a_run_is_not_cut_off_for_taking_its_time() -> None:
     assert result.stdout.strip() == "finished"
 
 
-def test_the_description_has_no_time_limit_and_mentions_backgrounding() -> None:
-    assert "no time limit" in PYTHON_TOOL_DESCRIPTION
+def test_the_description_states_there_is_no_timeout_and_mentions_backgrounding() -> None:
+    assert "no timeout" in PYTHON_TOOL_DESCRIPTION
     assert "background" in PYTHON_TOOL_DESCRIPTION
 
 

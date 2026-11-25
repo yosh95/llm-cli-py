@@ -223,7 +223,7 @@ def execute_python(code: str, explanation: str = "") -> ExecResult | ToolError:
     the shell would ignore everything after the first element.
 
     Args:
-        code: The Python code to execute.
+        code: The Python code to run.
         explanation: Why this code is being run, written for the user: one
             short sentence. Required, in the schema and here, because the reason
             is part of the call rather than optional commentary: the display
@@ -252,7 +252,7 @@ def execute_python(code: str, explanation: str = "") -> ExecResult | ToolError:
             error=(
                 "execute_python was NOT run: 'explanation' is missing or empty.\n"
                 "  It is required: one short sentence, written for the user, saying "
-                "why this code has to run --\n"
+                "why this code needs to run --\n"
                 "  it is shown in the transcript right after the code. Send the call "
                 "again with it, e.g.\n"
                 '  {"code": "...", "explanation": "Check which Python version is installed."}'
@@ -333,16 +333,16 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
     "properties": {
         "code": {
             "type": "string",
-            "description": "The Python code to execute. Use 'print()' for output.",
+            "description": "The Python code to run. Use `print()` to produce output.",
         },
         # Second, and required: a call has to say why it is being made, and the
         # display prints that sentence after the code it explains.
         "explanation": {
             "type": "string",
             "description": (
-                "Why this code has to run, in one short sentence written for the user. "
-                "It is shown in the transcript immediately after the code, so write the "
-                "reason for the call, not a restatement of what the code does."
+                "Why this code needs to run, in one short sentence addressed to the user. "
+                "It is shown in the transcript right after the code, so state the reason "
+                "for the call, not a restatement of what the code does."
             ),
         },
     },
@@ -350,18 +350,16 @@ PYTHON_TOOL_SCHEMA: dict[str, object] = {
 }
 
 PYTHON_TOOL_DESCRIPTION = """\
-Execute Python code in a subprocess and return stdout/stderr.
+Run Python code in a subprocess and return its stdout and stderr.
 
-The call blocks until the code exits, with no time limit: it returns when the
-run does. Print what you need as you go, and keep a run short enough that the
-turn does not have to wait on it longer than necessary. Work that is not needed
-right away is better started in the background: start it detached
-(subprocess.Popen(..., start_new_session=True) with its output written to a
-file) and return immediately, then check the file, the pid or a result in a
-later call.
+This call blocks until the process exits and has no timeout: it returns when the
+run does. Print what you need as you go, and keep each run short, so the turn
+does not wait on it longer than it needs to. If you do not need a result right
+away, start it detached in the background with its output written to a file,
+return immediately, and check the file, the PID, or the result in a later call.
 
 Every call also carries an "explanation": one sentence, written for the user,
-saying why this code has to run. It is required, and it is shown in the
+saying why this code needs to run. It is required, and it is shown in the
 transcript right after the code -- so write the reason for the call rather than
 a description of the code.
 """

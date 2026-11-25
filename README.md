@@ -509,7 +509,7 @@ Every call carries two arguments, and the schema marks both as `required`:
 | Argument | What it is |
 |---|---|
 | `code` | The Python to run. `print()` what the model needs to see. |
-| `explanation` | One short sentence, written for you, saying why this code has to run. |
+| `explanation` | One short sentence, written for you, saying why this code needs to run. |
 
 The explanation is shown in the transcript **directly after the code** it is
 about, and never inside anything the model controls: the order on screen is the
