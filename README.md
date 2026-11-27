@@ -255,19 +255,6 @@ Args:
       done
 ```
 
-A tool call that waits says so on its status line -- `waiting for the job to
-exit...` rather than `running...` -- because a wait and a hang look identical
-otherwise, and the status line is the only thing on screen while it waits:
-
-```text
-[Tool] execute_python waiting for /tmp/app.whl... 12.3s
-[09:32:41] Tool Result:
-    Exit code: 0
-    [wait] job 4f1c: waited 12.3s for /tmp/app.whl to exist -- satisfied
-    [stdout]
-      built app.whl
-```
-
 Progress is the exception. The status line of a running request or tool call, and
 the block that announces the call, carry no stamp: they are about what is
 happening now rather than about an event, and between them they already show what
@@ -337,7 +324,6 @@ the answer the model wrote. Markup characters in a model's or a tool's own text
 | `LLM_CLI_PROMPT_HISTORY_FILE` | File the prompt history is kept in, so the arrow keys recall earlier turns across runs. Unset (the default) keeps the history in memory for the current run only. |
 | `LLM_CLI_LOG_FILE` | File every conversation is logged to as JSON, tool calls and tool results included. Each run is added to it as a new session, so earlier runs survive a restart (they are never loaded back into the conversation). Unset (the default) writes no log at all. |
 | `LLM_CLI_PYTHON_EXEC` | Interpreter used by `execute_python` (defaults to the CLI's own interpreter). |
-| `LLM_CLI_JOBS_DIR` | Where background jobs keep their code, output and exit code (defaults to a directory under the system temp dir). |
 
 Only paths are configured by env var here: the project instructions are the
 `LLM_CLI.md` file the run finds on disk (see
@@ -548,68 +534,12 @@ model reads it, sends the call again with the sentence added, and nothing has to
 be retyped. (A `required` key alone is only a hint to the provider; some
 OpenAI-compatible servers pass a call through without checking it.)
 
-By default a run has **no time limit**: the call returns when the code does,
-however long that takes, and nothing is killed for taking its time. The call
-blocks the turn, so a script that never ends keeps the turn waiting -- the
-running timer on the status line shows it is still working, and Ctrl+C ends it:
-the child is killed together with every process it spawned, and the prompt comes
-back with nothing left running behind it.
-
-### Waiting for work whose duration is not known
-
-That default is right for code that finishes in a moment, which is most code.
-For work that takes minutes -- a build, a test suite, a server coming up -- a
-model has one thing to write and it is the wrong thing: `time.sleep(30)` and
-check again. A sleep is a **guess at a duration**, and both ways of being wrong
-cost a round trip: too short and the answer is "not yet", too long and the turn
-waits on a wall that is not there. Measured over this repository's own log, 59 of
-134 tool calls contained a wait, and those calls were 97% of all tool time.
-
-So the waiting is the tool's, through one optional argument -- not a separate
-tool, because start/wait/read as three calls would cost three round trips where
-one will do:
-
-```python
-execute_python(code, explanation, wait={"until": "exit", "timeout_s": 900})
-```
-
-| `until` | Returns when |
-|---|---|
-| `exit` (default) | the code exits -- however long that is, within `timeout_s` |
-| `background` | never: the code is started and its job id returned at once |
-| `file` / `gone` + `path` | that path appears / disappears |
-| `regex` + `path`, `pattern` | the pattern matches the tail of that file (a log line -- how a server says "Ready") |
-| `port` + `port` | something on localhost accepts a connection |
-
-`job: "<id>"` waits for a job an earlier call started (and `timeout_s: 0` reads
-its state without waiting at all), `tail_lines: N` returns only the end of a long
-output, `name` gives the job an id a later call can use, and `kill: true` stops a
-job by id. The result carries `wait` -- what was waited for, the outcome, the
-elapsed time, whether the job is still running, and `delivered` (whether the call
-got what it waited for, which is not the same as the code's exit code) -- in the
-JSON the model reads and as a `[wait]` line in the transcript.
-
-How it is built, and why:
-
-- **The output goes to a file, not a pipe.** A pipe holds ~64 KiB; a job that
-  prints more blocks in `write` with nobody reading it, and looks exactly like a
-  hung one. `communicate()` is not a fix either -- it reads to EOF, and EOF never
-  arrives while a detached descendant holds the write end.
-- **How the job ended is a file too** (`<id>.rc`, written through `os.replace`
-  by a launcher process). "Is it done?" is then the existence of a file: a fact
-  that survives the CLI exiting, cannot be confused by pid reuse, and reads the
-  same before and after a restart.
-- **The polling is in the tool**, twenty times a second, so no sleep is handed to
-  the model to guess with.
-- **A job is not bounded by `timeout_s`.** The budget bounds *the call*; the
-  result says whether the job is still running, and the same `name` waits for it
-  again. A condition about the world (a file, a line, a port) stops early when
-  the job exits: it can no longer come true, and sitting out the budget would
-  only delay the report.
-- **Ctrl+C still leaves nothing running.** A call that is waiting kills the job
-  it started and re-raises, so the turn is rolled back as before. A job started
-  with `until: "background"` is deliberately left running -- that is what
-  background means -- and `{"job": "<id>", "kill": true}` stops it.
+A run has **no time limit**: the call returns when the code does, however long
+that takes, and nothing is killed for taking its time. The call blocks the turn,
+so a script that never ends keeps the turn waiting -- the running timer on the
+status line shows it is still working, and Ctrl+C ends it: the child is killed
+together with every process it spawned, and the prompt comes back with nothing
+left running behind it.
 
 The child is given **no descriptor on the terminal**: its stdin is `/dev/null`
 and its output arrives over pipes. Tool code therefore cannot read the keys you
@@ -621,11 +551,9 @@ input, put it in the code; to run something with your keyboard, run it yourself.
 As a second line of defence the terminal's settings are captured before the run
 and before the prompt loop, and put back afterwards, however the run ends.
 
-The tool description tells the model the same, and -- since the waiting moved
-into the tool -- tells it **not** to write a `time.sleep(...)` loop that
-re-checks the work, but to pass `wait` instead. The old text said the opposite
-("start it detached and check the file in a later call"), which is what the
-sleeps in the log were following.
+The tool description tells the model the same, and that work which is not needed
+right away is better started detached (`subprocess.Popen(..., start_new_session=True)`
+writing to a file) and checked in a later call.
 
 A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as
