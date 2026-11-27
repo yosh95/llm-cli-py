@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,76 @@ def test_a_run_is_not_cut_off_for_taking_its_time() -> None:
     assert result.stdout.strip() == "finished"
 
 
-def test_the_description_states_there_is_no_timeout_and_mentions_backgrounding() -> None:
+def test_a_detached_process_does_not_hold_the_call_open() -> None:
+    """A process left running behind the code is not something this call waits for.
+
+    The call used to read the child's output through pipes, and ``communicate()``
+    reads to EOF. A detached descendant inherits the write end, so EOF arrives
+    only when *it* exits: "start it and return" took as long as the job it
+    started -- five seconds below, or a build's whole duration in practice.
+    """
+    code = """import subprocess, sys
+subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"], start_new_session=True)
+print("started", flush=True)
+"""
+    started = time.monotonic()
+    result = execute_python(code, explanation="Start something and return at once.")
+    elapsed = time.monotonic() - started
+
+    assert isinstance(result, ExecResult)
+    assert result.stdout.strip() == "started"
+    assert elapsed < 3.0, f"the call waited {elapsed:.1f}s for a process it should not wait for"
+
+
+def test_a_detached_process_writing_a_lot_does_not_hold_the_call_open() -> None:
+    """Nor can it stall on a full pipe: the output is a file, and files never block.
+
+    Regression for the second half of the same bug: a pipe holds ~64 KiB, so a
+    detached child that printed more than that blocked in ``write`` with nobody
+    reading it -- a hang that looked like the code's own.
+    """
+    code = """import subprocess, sys
+subprocess.Popen(
+    [sys.executable, "-c",
+     "import sys, time; sys.stdout.write('y' * 3000000); sys.stdout.flush(); time.sleep(5)"],
+    start_new_session=True,
+)
+print("started", flush=True)
+"""
+    started = time.monotonic()
+    result = execute_python(code, explanation="Start a noisy process and return at once.")
+    elapsed = time.monotonic() - started
+
+    assert isinstance(result, ExecResult)
+    assert result.stdout.strip() == "started"
+    assert elapsed < 3.0, f"the call waited {elapsed:.1f}s on a detached process's output"
+
+
+def test_a_large_output_comes_back_whole() -> None:
+    """Reading the output back from a file must not lose or cut anything.
+
+    The file is written while the child runs and read once it has exited, so a
+    large result is a check on that round trip rather than on a buffer size.
+    """
+    result = execute_python("print('x' * 5_000_000)", explanation="Print five megabytes.")
+
+    assert isinstance(result, ExecResult)
+    assert result.exit_code == 0
+    assert len(result.stdout) == 5_000_001
+
+
+def test_the_description_states_there_is_no_timeout_and_mentions_detaching() -> None:
+    """What the model is told has to match what the call does.
+
+    The three claims worth pinning: there is no timeout (a run that hangs is
+    ended with Ctrl+C), the waiting is the call's own job (so a `time.sleep`
+    loop is not the model's to write), and work not needed yet is started
+    detached with its own output file.
+    """
     assert "no timeout" in PYTHON_TOOL_DESCRIPTION
-    assert "background" in PYTHON_TOOL_DESCRIPTION
+    assert "time.sleep" in PYTHON_TOOL_DESCRIPTION
+    assert "detached" in PYTHON_TOOL_DESCRIPTION
+    assert "Popen" in PYTHON_TOOL_DESCRIPTION
 
 
 def test_the_schema_requires_an_explanation_as_well_as_the_code() -> None:
@@ -224,9 +292,6 @@ def test_a_tool_run_gives_the_terminal_back_even_if_it_was_changed(
         def __init__(self) -> None:
             fake.state = ["raw"]
             self.kwargs: dict[str, object] = {}
-
-        def communicate(self) -> tuple[str, str]:
-            return "", ""
 
         def poll(self) -> int:
             return 0

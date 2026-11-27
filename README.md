@@ -541,19 +541,30 @@ status line shows it is still working, and Ctrl+C ends it: the child is killed
 together with every process it spawned, and the prompt comes back with nothing
 left running behind it.
 
-The child is given **no descriptor on the terminal**: its stdin is `/dev/null`
-and its output arrives over pipes. Tool code therefore cannot read the keys you
-type at the `> ` prompt, and it cannot change the terminal's settings -- a child
-that put the terminal into raw mode used to leave it that way, and a raw terminal
-has `ISIG` off, which means Ctrl+C is no longer a signal for the CLI *or for the
-shell it returns to* (Ctrl+Z does not help either: it is a byte too). To read
-input, put it in the code; to run something with your keyboard, run it yourself.
-As a second line of defence the terminal's settings are captured before the run
-and before the prompt loop, and put back afterwards, however the run ends.
+The child is given **no descriptor on the terminal**: its stdin is `/dev/null`,
+and its stdout and stderr go to temporary files that are read back once the child
+exits -- not to pipes. A pipe holds about 64 KiB and, worse, `communicate()`
+reads to EOF: a process the code started and left running keeps the write end
+open, so a call that said "start it and return" waited out the very process it
+had detached. A file never blocks a writer and is read when the child is done, so
+what a detached process does afterwards cannot hold the turn open. Tool code
+cannot read the keys you type at the `> ` prompt, and it cannot change the
+terminal's settings -- a child that put the terminal into raw mode used to leave
+it that way, and a raw terminal has `ISIG` off, which means Ctrl+C is no longer a
+signal for the CLI *or for the shell it returns to* (Ctrl+Z does not help either:
+it is a byte too). To read input, put it in the code; to run something with your
+keyboard, run it yourself. As a second line of defence the terminal's settings
+are captured before the run and before the prompt loop, and put back afterwards,
+however the run ends.
 
-The tool description tells the model the same, and that work which is not needed
-right away is better started detached (`subprocess.Popen(..., start_new_session=True)`
-writing to a file) and checked in a later call.
+The tool description tells the model the same, and adds the one thing a model
+gets wrong about a blocking call: the waiting is the call's job, so it should
+**not** write a `time.sleep(...)` loop that re-checks the work, and should not
+pass `timeout=` to `subprocess` -- a sleep and a timeout are both guesses at how
+long the work takes, and the call simply returns when the code does. Work whose
+result is not needed yet is started detached with its own output file
+(`subprocess.Popen(..., stdout=open(...), start_new_session=True)`) and read in a
+later call.
 
 A tool must return an `ExecResult` or a `ToolError`; any other return value is
 reported to the model as an explicit error rather than being silently treated as
