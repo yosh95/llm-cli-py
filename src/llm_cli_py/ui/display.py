@@ -569,6 +569,13 @@ def _result_line_style(line: str, ok: bool) -> str:
     """
     if line.startswith("Exit code:"):
         return "green" if ok else "bold red"
+    if line.startswith("[wait]"):
+        # A wait that timed out is the one thing on the line that is not
+        # finished, and "ended first" is a different failure from "took too
+        # long" -- both are worth seeing without reading the sentence.
+        if "timed out" in line or "ended first" in line:
+            return "bold red"
+        return "dim"
     if line == "[stderr]" or line.startswith("Error:"):
         return "bold red"
     if line == "[stdout]":

@@ -27,6 +27,51 @@ def _append_tool_message(
     )
 
 
+def _running_label(name: str, arguments: dict[str, object]) -> str:
+    """Return the status line's label for a running tool call.
+
+    A tool that waits for something says so: ``[Tool] execute_python running...``
+    on a call that is waiting for a build reads exactly like one that has hung,
+    and this line is the only thing on screen while it waits. Naming the
+    condition turns the counter from "is it stuck?" into "what is it waiting
+    for?", which is the question a long wait actually raises.
+
+    ``wait`` is read defensively: it arrives from the model, so anything can be
+    in it, and a label is not worth failing a call over.
+    """
+    condition = _condition_label(arguments.get("wait"))
+    if condition is None:
+        return f"[Tool] {name} running..."
+    return f"[Tool] {name} waiting for {condition}..."
+
+
+def _condition_label(wait: object) -> str | None:
+    """Return a short description of a call's ``wait``, or ``None`` if it has none."""
+    if wait is None:
+        return None
+    if isinstance(wait, str):
+        wait = {"until": wait}
+    if not isinstance(wait, dict):
+        return None
+    job = wait.get("job")
+    if isinstance(job, str) and job:
+        return f"job {job}"
+    until = wait.get("until", "exit")
+    if until == "background":
+        return "the job to start"
+    if until == "file" and isinstance(wait.get("path"), str):
+        return str(wait["path"])
+    if until == "gone" and isinstance(wait.get("path"), str):
+        return f"{wait['path']} to go away"
+    if until == "regex" and isinstance(wait.get("path"), str):
+        return f"a line in {wait['path']}"
+    if until == "port" and isinstance(wait.get("port"), int):
+        return f"port {wait['port']}"
+    if isinstance(wait.get("timeout_s"), (int, float)) and wait["timeout_s"] == 0:
+        return "the job to report its state"
+    return "the job to exit"
+
+
 class SessionContext:
     """Context holding shared resources for a session."""
 
@@ -128,8 +173,9 @@ class ActiveSession:
             # that shows a long one is still moving. The same timer is recorded
             # with the result, so the log says how long it took even when it
             # failed.
+            label = _running_label(tc.name, tc.arguments)
             try:
-                with ui.display.working(f"[Tool] {tc.name} running...") as timer:
+                with ui.display.working(label) as timer:
                     result = tool.func(**tc.arguments)
             except Exception as e:
                 ui.display.report_error(f"Tool '{tc.name}' failed: {e}")

@@ -8,6 +8,7 @@ from .types import (
     ExecResult,
     ToolError,
     ToolResult,
+    WaitInfo,
     normalise_tool_result,
 )
 
@@ -19,6 +20,7 @@ __all__ = [
     "ToolError",
     "ToolRegistry",
     "ToolResult",
+    "WaitInfo",
     "execute_python",
     "normalise_tool_result",
 ]

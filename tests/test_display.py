@@ -18,7 +18,7 @@ import pytest
 from rich.cells import cell_len
 from rich.console import Console
 
-from llm_cli_py.tools.types import ExecResult, ToolError
+from llm_cli_py.tools.types import ExecResult, ToolError, WaitInfo
 from llm_cli_py.ui import display
 from llm_cli_py.utils.clock import Clock
 
@@ -585,6 +585,68 @@ def test_a_failed_result_is_red_on_a_terminal(terminal) -> None:
 
     assert "\x1b[1;31m" in terminal.raw or "\x1b[31m" in terminal.raw  # red
     assert "Exit code: 1" in terminal.text
+
+
+def test_a_wait_is_reported_above_the_output_it_explains(plain) -> None:
+    """What was waited for, and how it ended, comes before the output.
+
+    The output is read in the light of the wait: "the job exited" and "it timed
+    out and is still running" mean different things about the same stdout, so the
+    answer has to come first.
+    """
+    display.print_tool_result(
+        ExecResult(
+            stdout="partial\n",
+            wait=WaitInfo(
+                job="build",
+                condition="the job to exit",
+                outcome="timeout",
+                elapsed_s=12.5,
+                running=True,
+            ),
+        )
+    )
+
+    lines = [line.strip() for line in plain.text.splitlines()]
+    expected = "[wait] job build: waited 12.5s for the job to exit -- timed out, job still running"
+    wait_at = lines.index(expected)
+    assert wait_at < lines.index("[stdout]")
+    assert lines[wait_at - 1] == "Exit code: 0"
+
+
+def test_a_timed_out_wait_is_red_on_a_terminal(terminal) -> None:
+    """A wait that ran out is not a success, even when the code itself exited 0."""
+    display.print_tool_result(
+        ExecResult(
+            wait=WaitInfo(
+                job="build",
+                condition="the job to exit",
+                outcome="timeout",
+                elapsed_s=1.0,
+                running=True,
+            )
+        )
+    )
+
+    wait_line = next(line for line in terminal.raw.splitlines() if "[wait]" in line)
+    assert "31m" in wait_line  # red
+
+
+def test_a_satisfied_wait_is_not_red(terminal) -> None:
+    display.print_tool_result(
+        ExecResult(
+            wait=WaitInfo(
+                job="build",
+                condition="the job to exit",
+                outcome="satisfied",
+                elapsed_s=1.0,
+                running=False,
+            )
+        )
+    )
+
+    wait_line = next(line for line in terminal.raw.splitlines() if "[wait]" in line)
+    assert "31m" not in wait_line
 
 
 def test_a_tool_error_result_is_red_too(terminal) -> None:

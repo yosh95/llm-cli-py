@@ -10,8 +10,10 @@ from unittest.mock import patch
 import pytest
 
 from llm_cli_py.models import LlmResponse, Message, Role, ToolCall
+from llm_cli_py.session.session import ActiveSession, SessionContext
+from llm_cli_py.tools.registry import ToolRegistry
 from llm_cli_py.tools.types import ExecResult, ToolError
-from tests.conftest import completion, register, tool_call, tool_then_text
+from tests.conftest import completion, make_client, register, tool_call, tool_then_text
 
 
 def test_a_plain_answer_is_printed(turn) -> None:
@@ -173,3 +175,46 @@ def test_rolling_back_without_an_assistant_reply_does_nothing(session) -> None:
     session.client.rollback_last_turn()
 
     assert [(m.role.value, m.content) for m in session.client.state.conversation] == [("user", "hello")]
+
+
+def test_the_status_line_says_what_a_call_is_waiting_for() -> None:
+    """A wait names its condition, so a long call does not read as a hung one.
+
+    ``[Tool] execute_python running...`` on a call that is waiting for a build is
+    the same line a stuck process produces; naming the condition is what tells
+    the two apart on the one line the terminal shows while it waits.
+    """
+    from llm_cli_py.session.session import _running_label
+
+    assert _running_label("execute_python", {}) == "[Tool] execute_python running..."
+    assert (
+        _running_label("execute_python", {"wait": {"until": "exit"}})
+        == "[Tool] execute_python waiting for the job to exit..."
+    )
+    assert (
+        _running_label("execute_python", {"wait": {"until": "file", "path": "/tmp/out.bin"}})
+        == "[Tool] execute_python waiting for /tmp/out.bin..."
+    )
+    assert (
+        _running_label("execute_python", {"wait": {"job": "build"}})
+        == "[Tool] execute_python waiting for job build..."
+    )
+    assert (
+        _running_label("execute_python", {"wait": {"until": "port", "port": 8080}})
+        == "[Tool] execute_python waiting for port 8080..."
+    )
+    # Anything at all can arrive from the model: a label is not worth failing a call over.
+    assert _running_label("execute_python", {"wait": 42}) == "[Tool] execute_python running..."
+
+
+def test_a_waiting_tool_run_does_not_read_as_a_plain_run(capsys) -> None:
+    """The label reaches the screen, not just the helper."""
+    session = ActiveSession(make_client("gpt-4o"), SessionContext(tool_registry=ToolRegistry()))
+    register(session.ctx.tool_registry, "waits", lambda **_: ExecResult(stdout="k"))
+    tool = ToolCall(id="c1", name="waits", arguments={"wait": {"until": "exit"}})
+
+    with patch.object(session.client, "send", side_effect=tool_then_text(tool, "ok")):
+        session.process_and_print("go")
+
+    out = capsys.readouterr().out
+    assert "waiting for the job to exit" in out
