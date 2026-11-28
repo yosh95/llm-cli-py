@@ -1,3 +1,3 @@
 """llm-cli-py: Unified OpenAI-Compatible CLI for AI Agents (Python Edition)."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

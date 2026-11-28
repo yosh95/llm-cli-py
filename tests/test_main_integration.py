@@ -16,7 +16,7 @@ import llm_cli_py
 from llm_cli_py.main import build_parser, initialize_tools
 from llm_cli_py.main import main as main_module_main
 
-VERSION_OUTPUT = "llm-cli-py 0.3.0"
+VERSION_OUTPUT = "llm-cli-py 0.4.0"
 
 
 def _run_as_module(*argv: str) -> subprocess.CompletedProcess[str]:
@@ -419,23 +419,24 @@ def test_raw_shows_the_conversation_as_markdown_without_asking_the_model(typed: 
 def test_raw_changes_neither_the_conversation_nor_the_log(tmp_path, capsys) -> None:
     """Showing a conversation is not a change to it, so the file on disk stands.
 
-    The log is rewritten whenever a message is recorded; ``/raw`` records none,
+    The log is appended to whenever a message is recorded; ``/raw`` records none,
     so the file is left exactly as the last turn wrote it.
     """
     from llm_cli_py.session import interactive as interactive_mod
     from llm_cli_py.session.transcript import ConversationLog
 
     session, client = raw_session()
-    log_path = tmp_path / "log.json"
-    client.observe(ConversationLog(log_path))
-    log = ConversationLog(log_path)  # the same path, for a write that must not move it
-    log.save(client.state)
-    before = log_path.read_text(encoding="utf-8")
+    log = ConversationLog(tmp_path / "log")
+    log.prepare()
+    client.observe(log)
+    path = log.path
+    assert path is not None
+    before = path.read_text(encoding="utf-8")
 
     interactive_mod.handle_user_input(session, "/raw")  # type: ignore[arg-type]
 
     assert "# Conversation (gpt-4o)" in capsys.readouterr().out
-    assert log_path.read_text(encoding="utf-8") == before
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_a_line_that_only_starts_with_raw_is_still_a_turn(capsys) -> None:

@@ -26,5 +26,6 @@ Thumbs.db
 
 # log
 llm_cli_log
+llm_cli_log/
 llm_cli_prompt_history
 

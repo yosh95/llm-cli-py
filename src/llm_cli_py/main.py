@@ -25,7 +25,7 @@ from .consts import (
     DEFAULT_API_URL,
     ENV_API_KEY,
     ENV_API_URL,
-    ENV_LOG_FILE,
+    ENV_LOG_DIR,
     ENV_MODEL,
 )
 from .providers.llm_api import LlmApiClient
@@ -101,18 +101,19 @@ def _prompt_session_or_none() -> PromptSession[str] | None:
 
 
 def _conversation_log_or_none() -> ConversationLog | None:
-    """Build the log named by ``LLM_CLI_LOG_FILE``, or ``None`` when unset.
+    """Build the log for ``LLM_CLI_LOG_DIR``, or ``None`` when unset.
 
-    Unset is the default and means no file is written at all. When set, the log
-    that is already there is read once here, so a path that cannot be read or
-    written says so at startup rather than at the end of the first turn; the log
-    then disables itself and the run continues without it.
+    Unset is the default and means no file is written at all. When set, the
+    directory is prepared here -- created if needed, and this run's file opened
+    in it -- so a path that cannot be used says so at startup rather than at the
+    end of the first turn; the log then disables itself and the run continues
+    without it.
 
-    Reading it is all that happens to it: the sessions already in the file are
-    carried into what this run writes, and nothing of them reaches the
-    conversation -- this run starts empty.
+    Nothing already in the directory is read: this run adds a file of its own, so
+    a long history of logged runs costs nothing here, and nothing of them reaches
+    the conversation -- the run starts empty.
     """
-    configured = os.environ.get(ENV_LOG_FILE, "").strip()
+    configured = os.environ.get(ENV_LOG_DIR, "").strip()
     if not configured:
         return None
 
@@ -120,7 +121,7 @@ def _conversation_log_or_none() -> ConversationLog | None:
         log = ConversationLog(configured, started_at=datetime.now())
         log.prepare()
     except UNUSABLE_PATH as e:
-        ui_display.report_error(f"Could not use the conversation log {configured!r}: {e}")
+        ui_display.report_error(f"Could not use the conversation log directory {configured!r}: {e}")
         ui_display.report_info("Continuing without a log.")
         return None
 
@@ -224,16 +225,23 @@ def main() -> None:
         tool_registry=tool_registry,
     )
     # ── Optional conversation log ──────────────────────────────────
-    # Unset LLM_CLI_LOG_FILE means no file; when set, this run's conversation is
-    # added to it as a new session and rewritten there as it grows, tool calls
-    # included, so an interrupted run still leaves what had been recorded and
-    # the sessions already in the file keep standing beside it.
+    # Unset LLM_CLI_LOG_DIR means no file; when set, this run gets a file of its
+    # own in that directory and appends to it as the conversation grows, tool
+    # calls included, so an interrupted run still leaves what had been recorded
+    # and the runs already logged keep their files untouched.
     log = _conversation_log_or_none()
     if log is not None:
         client.observe(log)
 
     session = ActiveSession(client, ctx)
-    run_interactive(session, prompt, _prompt_session_or_none())
+    try:
+        run_interactive(session, prompt, _prompt_session_or_none())
+    finally:
+        # The file stays usable without this -- every line is flushed as it is
+        # written -- but closing it says the run is over rather than leaving the
+        # descriptor to the interpreter's exit.
+        if log is not None:
+            log.close()
 
 
 if __name__ == "__main__":

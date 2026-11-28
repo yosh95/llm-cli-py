@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
 UNUSABLE_PATH = (OSError, ValueError, RuntimeError)
@@ -22,8 +20,8 @@ def clean_path(value: str | Path) -> Path:
     the shell put there. Three things are undone here, once, for both the log and
     the history:
 
-    * surrounding whitespace -- ``  ~/log.json``;
-    * one pair of surrounding quotes -- ``set LLM_CLI_LOG_FILE="C:\\My Logs\\log.json"``
+    * surrounding whitespace -- ``  ~/state/llm-cli/runs``;
+    * one pair of surrounding quotes -- ``set LLM_CLI_LOG_DIR="C:\\My Logs\\runs"``
       in ``cmd.exe`` leaves the quotes *in* the value, unlike a POSIX shell or
       PowerShell, which is how a Windows path with a space gets here;
     * a leading ``~``, expanded against the home directory (``USERPROFILE`` on
@@ -45,27 +43,3 @@ def clean_path(value: str | Path) -> Path:
     # home directory, or a ``~name`` that does not exist), so callers treat that
     # along with ValueError and OSError as "this path cannot be used".
     return Path(text).expanduser().absolute()
-
-
-def write_text_atomically(path: Path, text: str) -> None:
-    """Write ``text`` to ``path``, never leaving a half-written file behind.
-
-    The text goes to a temporary file in the same directory, which is then
-    renamed onto ``path``: a rename within one filesystem is atomic, so a reader
-    sees either the previous contents or the new ones. That matters for a log
-    that is rewritten as the conversation grows -- an interrupted run must still
-    leave a file that parses.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    handle, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as file:
-            file.write(text)
-        temp_path.replace(path)
-    except BaseException:
-        # Includes KeyboardInterrupt: whatever happened, the temporary file must
-        # not be left lying next to the log.
-        temp_path.unlink(missing_ok=True)
-        raise

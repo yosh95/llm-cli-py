@@ -189,29 +189,38 @@ def test_the_instructions_appear_in_raw_as_the_first_section() -> None:
 
 
 def test_the_instructions_are_the_first_record_in_the_log(tmp_path) -> None:
+    """The system message is the run's opening record, not a preamble kept apart."""
     from llm_cli_py.models import Message
     from llm_cli_py.session.transcript import ConversationLog
 
+    log = ConversationLog(tmp_path / "log")
+    log.prepare()
     client = make_client("gpt-4o", instructions="Be brief.\n")
+    client.observe(log)
     client.remember(Message(role=Role.USER, content="hello"))
-    log_path = tmp_path / "log.json"
-    ConversationLog(log_path).save(client.state)
+    log.close()
 
-    document = json.loads(log_path.read_text(encoding="utf-8"))
-    assert document["sessions"][-1]["conversation"] == [
+    path = log.path
+    assert path is not None
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    logged = [{k: v for k, v in record.items() if k != "type"} for record in records[2:]]
+    assert logged == [
         {"role": "system", "content": "Be brief.\n"},
         {"role": "user", "content": "hello"},
     ]
 
 
 def test_the_instructions_are_not_counted_as_a_measured_duration() -> None:
+    """Nothing was measured to produce the instructions, so their record has no time."""
     from llm_cli_py.models import Message
-    from llm_cli_py.session.transcript import session_record
+    from llm_cli_py.session.transcript import message_record
 
     client = make_client("gpt-4o", instructions="Be brief.\n")
     client.remember(Message(role=Role.ASSISTANT, content="hi", duration_ms=10.0))
 
-    assert session_record(client.state)["durations_ms"] == {"llm": 10.0}
+    system, assistant = client.state.conversation
+    assert "duration_ms" not in message_record(system)
+    assert message_record(assistant)["duration_ms"] == 10.0
 
 
 def test_the_module_reads_the_file_named_by_the_constant() -> None:
